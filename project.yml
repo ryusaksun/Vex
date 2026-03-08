@@ -1,0 +1,45 @@
+name: Vex
+options:
+  bundleIdPrefix: com.ryuichi
+  deploymentTarget:
+    iOS: "18.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+packages:
+  SwiftSoup:
+    url: https://github.com/scinfu/SwiftSoup.git
+    from: "2.7.0"
+  Kingfisher:
+    url: https://github.com/onevcat/Kingfisher.git
+    from: "8.0.0"
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui.git
+    from: "2.4.0"
+
+targets:
+  Vex:
+    type: application
+    platform: iOS
+    sources:
+      - Vex
+    settings:
+      base:
+        INFOPLIST_FILE: Vex/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.ryuichi.vex
+        MARKETING_VERSION: "2.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: "2FJFJ2WAF8"
+        SWIFT_VERSION: "6.0"
+    dependencies:
+      - package: SwiftSoup
+      - package: Kingfisher
+      - package: MarkdownUI
+
+  VexTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - VexTests
+    dependencies:
+      - target: Vex
