@@ -80,7 +80,7 @@ struct NotificationRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            KFImage(URL(string: notification.member.avatarNormal))
+            KFImage(URL(string: HTMLParser.resolveURL(notification.member.avatarNormal)))
                 .resizable()
                 .frame(width: 36, height: 36)
                 .clipShape(Circle())

@@ -19,16 +19,16 @@ actor CacheManager {
         // Try memory first
         if let entry = memoryCache[key],
            Date().timeIntervalSince(entry.timestamp) < maxAge {
-            return try? JSONDecoder().decode(T.self, from: entry.data)
+            return try? JSONDecoder().decode(CacheWrapper<T>.self, from: entry.data).value
         }
 
         // Try disk
         if let data = defaults.data(forKey: cachePrefix + key) {
-            if let entry = try? JSONDecoder().decode(CacheWrapper<T>.self, from: data),
-               Date().timeIntervalSince(entry.timestamp) < maxAge {
-                // Warm up memory cache
-                memoryCache[key] = CacheEntry(data: data, timestamp: entry.timestamp)
-                return entry.value
+            if let wrapper = try? JSONDecoder().decode(CacheWrapper<T>.self, from: data),
+               Date().timeIntervalSince(wrapper.timestamp) < maxAge {
+                // Warm up memory cache (使用相同格式的 data)
+                memoryCache[key] = CacheEntry(data: data, timestamp: wrapper.timestamp)
+                return wrapper.value
             }
         }
 
@@ -36,9 +36,10 @@ actor CacheManager {
     }
 
     func set<T: Codable>(_ key: String, value: T) {
-        let wrapper = CacheWrapper(value: value, timestamp: Date())
+        let now = Date()
+        let wrapper = CacheWrapper(value: value, timestamp: now)
         if let data = try? JSONEncoder().encode(wrapper) {
-            memoryCache[key] = CacheEntry(data: data, timestamp: Date())
+            memoryCache[key] = CacheEntry(data: data, timestamp: now)
             defaults.set(data, forKey: cachePrefix + key)
         }
     }

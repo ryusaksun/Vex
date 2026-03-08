@@ -145,18 +145,13 @@ struct HomeView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: TopicBasic.self) { topic in
-            TopicDetailView(topicId: topic.id, brief: topic)
-        }
-        .navigationDestination(for: MemberBasic.self) { member in
-            MemberDetailView(username: member.username)
-        }
-        .navigationDestination(for: NodeBasic.self) { node in
-            NodeDetailView(nodeName: node.name, brief: node)
-        }
         .task {
             await loadTabs()
-            await loadFeeds()
+            // loadFeeds 会由 loadTabs 修改 selectedTab 后通过 onChange 触发
+            // 如果 selectedTab 未变（仍为 "all"），则手动加载
+            if feeds.isEmpty && selectedTab != "xna" {
+                await loadFeeds()
+            }
         }
         .onChange(of: selectedTab) {
             router.homeBarsVisible = true

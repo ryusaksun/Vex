@@ -23,6 +23,7 @@ struct TopicDetailView: View {
     @State private var showShareSheet = false
     @State private var showEditSheet = false
     @State private var barVisible = true
+    @State private var conversationReplyIds = Set<Int>()
 
     private let client = V2EXClient.shared
 
@@ -66,7 +67,7 @@ struct TopicDetailView: View {
                     ForEach(replies) { reply in
                         ReplyRow(
                             reply: reply,
-                            hasConversation: hasConversation(reply),
+                            hasConversation: conversationReplyIds.contains(reply.id),
                             onReply: {
                                 replyTarget = reply
                             },
@@ -197,12 +198,6 @@ struct TopicDetailView: View {
                 TopicDetailSkeleton()
             }
         }
-        .navigationDestination(for: MemberBasic.self) { member in
-            MemberDetailView(username: member.username)
-        }
-        .navigationDestination(for: NodeBasic.self) { node in
-            NodeDetailView(nodeName: node.name, brief: node)
-        }
         .sheet(item: $conversationReply) { reply in
             ConversationSheet(reply: reply, allReplies: replies)
         }
@@ -232,7 +227,7 @@ struct TopicDetailView: View {
             // Author info
             HStack(spacing: 10) {
                 NavigationLink(value: topic.member) {
-                    KFImage(URL(string: topic.member.avatarLarge))
+                    KFImage(URL(string: HTMLParser.resolveURL(topic.member.avatarLarge)))
                         .resizable()
                         .frame(width: 32, height: 32)
                         .clipShape(Circle())
@@ -288,6 +283,7 @@ struct TopicDetailView: View {
             replies = result.replies
             currentPage = result.pagination.current
             totalPages = result.pagination.total
+            updateConversationIds()
         } catch {
             self.error = error.localizedDescription
         }
@@ -301,29 +297,43 @@ struct TopicDetailView: View {
             replies.append(contentsOf: result.replies)
             currentPage = result.pagination.current
             totalPages = result.pagination.total
+            updateConversationIds()
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    private func hasConversation(_ reply: TopicReply) -> Bool {
-        let username = reply.member.username
-        return !reply.membersMentioned.isEmpty
-            || replies.contains(where: { $0.membersMentioned.contains(username) })
+    private func updateConversationIds() {
+        var ids = Set<Int>()
+        // 收集所有被提及的用户名
+        var mentionedUsernames = Set<String>()
+        for reply in replies {
+            if !reply.membersMentioned.isEmpty {
+                ids.insert(reply.id)
+                mentionedUsernames.formUnion(reply.membersMentioned)
+            }
+        }
+        // 被其他回复提及的用户的回复也算有会话
+        for reply in replies {
+            if mentionedUsernames.contains(reply.member.username) {
+                ids.insert(reply.id)
+            }
+        }
+        conversationReplyIds = ids
     }
 
     // MARK: - Actions
 
     private func toggleCollect() async {
-        guard topic != nil else { return }
+        guard let t = topic else { return }
         do {
-            if topic!.collected {
+            if t.collected {
                 topic = try await client.uncollectTopic(id: topicId)
             } else {
                 topic = try await client.collectTopic(id: topicId)
             }
             HapticManager.notification(.success)
-            alert.show(.success, topic!.collected ? "已收藏" : "已取消收藏")
+            alert.show(.success, topic?.collected == true ? "已收藏" : "已取消收藏")
         } catch {
             alert.show(.error, error.localizedDescription)
         }

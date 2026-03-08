@@ -21,7 +21,7 @@ struct NodeDetailView: View {
                     VStack(spacing: 12) {
                         HStack(spacing: 12) {
                             if !node.avatarLarge.isEmpty {
-                                KFImage(URL(string: node.avatarLarge))
+                                KFImage(URL(string: HTMLParser.resolveURL(node.avatarLarge)))
                                     .resizable()
                                     .aspectRatio(contentMode: .fill)
                                     .frame(width: 48, height: 48)
@@ -136,7 +136,7 @@ struct NodeTopicRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            KFImage(URL(string: feed.member.avatarNormal))
+            KFImage(URL(string: HTMLParser.resolveURL(feed.member.avatarNormal)))
                 .resizable()
                 .placeholder {
                     Circle().fill(.quaternary)

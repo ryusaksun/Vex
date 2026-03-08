@@ -587,8 +587,8 @@ enum HTMLParser {
                 votes: votes,
                 member: member,
                 node: node,
-                lastReplyTime: parts.count > 2 ? parts[2] : "",
-                lastReplyBy: parts.last ?? ""
+                lastReplyTime: parts.count > 2 ? parts[2] : nil,
+                lastReplyBy: parts.count > 1 ? parts.last : nil
             ))
         }
 

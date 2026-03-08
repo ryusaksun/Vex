@@ -10,6 +10,7 @@ struct InAppBrowserView: View {
     @State private var progress: Double = 0
     @State private var canGoBack = false
     @State private var canGoForward = false
+    @State private var currentURL: URL?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,7 +25,8 @@ struct InAppBrowserView: View {
                 pageTitle: $pageTitle,
                 progress: $progress,
                 canGoBack: $canGoBack,
-                canGoForward: $canGoForward
+                canGoForward: $canGoForward,
+                currentURL: $currentURL
             )
         }
         .navigationTitle(title ?? pageTitle)
@@ -47,10 +49,10 @@ struct InAppBrowserView: View {
 
                 Spacer()
 
-                ShareLink(item: url)
+                ShareLink(item: currentURL ?? url)
 
                 Button {
-                    UIApplication.shared.open(url)
+                    UIApplication.shared.open(currentURL ?? url)
                 } label: {
                     Image(systemName: "safari")
                 }
@@ -70,6 +72,7 @@ struct BrowserWebView: UIViewRepresentable {
     @Binding var progress: Double
     @Binding var canGoBack: Bool
     @Binding var canGoForward: Bool
+    @Binding var currentURL: URL?
 
     func makeUIView(context: Context) -> WKWebView {
         let webView = WKWebView()
@@ -97,6 +100,11 @@ struct BrowserWebView: UIViewRepresentable {
                 self.canGoForward = webView.canGoForward
             }
         }
+        context.coordinator.urlObserver = webView.observe(\.url) { webView, _ in
+            DispatchQueue.main.async {
+                self.currentURL = webView.url
+            }
+        }
 
         // Navigation notifications
         context.coordinator.backObserver = NotificationCenter.default.addObserver(
@@ -122,6 +130,7 @@ struct BrowserWebView: UIViewRepresentable {
         var titleObserver: NSKeyValueObservation?
         var canGoBackObserver: NSKeyValueObservation?
         var canGoForwardObserver: NSKeyValueObservation?
+        var urlObserver: NSKeyValueObservation?
         nonisolated(unsafe) var backObserver: Any?
         nonisolated(unsafe) var forwardObserver: Any?
 

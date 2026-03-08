@@ -11,7 +11,7 @@ struct ReplyRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             NavigationLink(value: reply.member) {
-                KFImage(URL(string: reply.member.avatarNormal))
+                KFImage(URL(string: HTMLParser.resolveURL(reply.member.avatarNormal)))
                     .resizable()
                     .frame(width: 24, height: 24)
                     .clipShape(Circle())

@@ -33,6 +33,7 @@ struct ConversationSheet: View {
                     Button("完成") { dismiss() }
                 }
             }
+            .commonNavigationDestinations()
         }
     }
 

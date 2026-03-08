@@ -55,7 +55,13 @@ final class V2EXClient: ObservableObject {
             request.httpMethod = method
             if let formData {
                 request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-                let body = formData.map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.value)" }.joined(separator: "&")
+                var allowed = CharacterSet.urlQueryAllowed
+                allowed.remove(charactersIn: "&=+")
+                let body = formData.map {
+                    let key = $0.key.addingPercentEncoding(withAllowedCharacters: allowed) ?? $0.key
+                    let value = $0.value.addingPercentEncoding(withAllowedCharacters: allowed) ?? $0.value
+                    return "\(key)=\(value)"
+                }.joined(separator: "&")
                 request.httpBody = body.data(using: .utf8)
             }
         }
@@ -75,6 +81,15 @@ final class V2EXClient: ObservableObject {
             }
         } else {
             error403Count = 0
+        }
+
+        // Handle other HTTP errors
+        let statusCode = httpResponse.statusCode
+        if statusCode >= 500 {
+            throw V2EXError.unexpectedResponse("服务器错误 (\(statusCode))")
+        }
+        if statusCode == 404 {
+            throw V2EXError.resourceNotFound
         }
 
         return (data, httpResponse)
@@ -100,7 +115,9 @@ final class V2EXClient: ObservableObject {
             throw V2EXError.restricted
         }
 
-        let html = String(data: data, encoding: .utf8) ?? ""
+        guard let html = String(data: data, encoding: .utf8), !html.isEmpty else {
+            throw V2EXError.unexpectedResponse("无法解码响应内容")
+        }
         let doc = try HTMLParser.parseDocument(html)
 
         // Side effects: extract once token, unread count, username, balance
@@ -171,7 +188,7 @@ final class V2EXClient: ObservableObject {
         struct APITopic: Decodable {
             let id: Int
             let title: String
-            let content_rendered: String
+            let contentRendered: String
             let replies: Int
             let created: Int
             let member: APIMember
@@ -179,9 +196,9 @@ final class V2EXClient: ObservableObject {
 
             struct APIMember: Decodable {
                 let username: String
-                let avatar_mini: String?
-                let avatar_normal: String?
-                let avatar_large: String?
+                let avatarMini: String?
+                let avatarNormal: String?
+                let avatarLarge: String?
             }
             struct APINode: Decodable {
                 let name: String
@@ -197,11 +214,11 @@ final class V2EXClient: ObservableObject {
                 replies: t.replies,
                 member: MemberBasic(
                     username: t.member.username,
-                    avatarMini: t.member.avatar_mini ?? "",
-                    avatarNormal: t.member.avatar_normal ?? "",
-                    avatarLarge: t.member.avatar_large ?? ""
+                    avatarMini: t.member.avatarMini ?? "",
+                    avatarNormal: t.member.avatarNormal ?? "",
+                    avatarLarge: t.member.avatarLarge ?? ""
                 ),
-                contentRendered: t.content_rendered,
+                contentRendered: t.contentRendered,
                 createdTime: "",
                 node: NodeBasic(name: t.node.name, title: t.node.title),
                 subtles: [],
@@ -328,17 +345,28 @@ final class V2EXClient: ObservableObject {
         ]
         if let content { form["content"] = content }
 
-        let doc = try await fetchHTML(path: "/write", method: "POST", formData: form)
+        let (data, response) = try await request(path: "/write", method: "POST", formData: form)
         invalidateOnce()
+
+        let html = String(data: data, encoding: .utf8) ?? ""
+        let doc = try HTMLParser.parseDocument(html)
 
         let problems = try HTMLParser.parseFormProblems(doc)
         if !problems.isEmpty {
             throw V2EXError.formProblems(problems)
         }
 
-        // Should have redirected to /t/{id}
-        // Try to parse topic detail from current page
-        return try HTMLParser.parseTopicDetail(doc, id: 0) // ID will be extracted from page
+        // 从重定向后的 URL 中提取帖子 ID
+        var topicId = 0
+        if let finalURL = response.url?.absoluteString,
+           let match = finalURL.firstMatch(of: /\/t\/(\d+)/) {
+            topicId = Int(match.1) ?? 0
+        }
+        if topicId == 0 {
+            throw V2EXError.unexpectedResponse("无法获取新帖子 ID")
+        }
+
+        return try HTMLParser.parseTopicDetail(doc, id: topicId)
     }
 
     // MARK: - Nodes

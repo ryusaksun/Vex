@@ -50,12 +50,12 @@ final class ClipboardWatcher {
                 return .topic(id)
             }
         }
-        // Match /go/{name}
-        if let match = text.firstMatch(of: /v2ex\.com\/go\/(\w+)/) {
+        // Match /go/{name} (节点名可能包含连字符)
+        if let match = text.firstMatch(of: /v2ex\.com\/go\/([\w-]+)/) {
             return .node(String(match.1))
         }
-        // Match /member/{username}
-        if let match = text.firstMatch(of: /v2ex\.com\/member\/(\w+)/) {
+        // Match /member/{username} (用户名可能包含连字符)
+        if let match = text.firstMatch(of: /v2ex\.com\/member\/([\w-]+)/) {
             return .member(String(match.1))
         }
         return nil

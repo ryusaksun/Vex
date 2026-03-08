@@ -5,6 +5,7 @@ struct ContentView: View {
     @Environment(Router.self) private var router
     @Environment(CloudflareManager.self) private var cloudflare
     @Environment(ClipboardWatcher.self) private var clipboard
+    @EnvironmentObject private var settings: AppSettingsManager
 
     @State private var showNewTopic = false
 
@@ -64,7 +65,9 @@ struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-            clipboard.checkClipboard()
+            if settings.autoCheckClipboard {
+                clipboard.checkClipboard()
+            }
             cloudflare.checkIfNeeded()
         }
     }

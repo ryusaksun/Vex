@@ -28,10 +28,11 @@ struct NodeDetail: Codable, Hashable, Sendable {
         NodeBasic(name: name, title: title)
     }
 
+    // 注意：如果通过 fetchJSON 解码，需确保 decoder 不使用 convertFromSnakeCase
     enum CodingKeys: String, CodingKey {
         case nodeId = "id"
         case name, title, header, topics, collected, theme
-        case avatarLarge = "avatar_large"
+        case avatarLarge
     }
 }
 

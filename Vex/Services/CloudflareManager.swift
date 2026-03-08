@@ -63,14 +63,14 @@ struct CloudflareWebView: UIViewRepresentable {
             webView.evaluateJavaScript("document.title") { title, _ in
                 if let title = title as? String,
                    !title.lowercased().contains("just a moment") {
-                    // Sync cookies
+                    // Sync cookies，确保完成后再回调
                     WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
                         for cookie in cookies {
                             HTTPCookieStorage.shared.setCookie(cookie)
                         }
-                    }
-                    DispatchQueue.main.async {
-                        self.onCompleted()
+                        DispatchQueue.main.async {
+                            self.onCompleted()
+                        }
                     }
                 }
             }

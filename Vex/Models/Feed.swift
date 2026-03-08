@@ -45,7 +45,7 @@ struct MemberTopicFeed: Codable, Hashable, Identifiable, Sendable {
 }
 
 struct RepliedTopicFeed: Codable, Hashable, Identifiable, Sendable {
-    var id: Int { topic.id }
+    var id: String { "\(topic.id)-\(replyTime)-\(replyContentRendered.hashValue)" }
     let topic: TopicBasic
     let member: MemberBasic
     let replyContentRendered: String
@@ -58,8 +58,8 @@ struct CollectedTopicFeed: Codable, Hashable, Identifiable, Sendable {
     let votes: Int?
     let member: MemberBasic
     let node: NodeBasic
-    let lastReplyTime: String
-    let lastReplyBy: String
+    let lastReplyTime: String?
+    let lastReplyBy: String?
 }
 
 struct XnaFeed: Codable, Hashable, Identifiable, Sendable {
@@ -96,7 +96,7 @@ struct BalanceBrief: Codable, Hashable, Sendable {
 }
 
 struct BalanceRecord: Codable, Hashable, Identifiable, Sendable {
-    let id = UUID()
+    var id: String { "\(type)-\(time)-\(amount)" }
     let type: String
     let time: String
     let amount: String

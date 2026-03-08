@@ -6,7 +6,7 @@ struct TopicRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            KFImage(URL(string: feed.member.avatarNormal))
+            KFImage(URL(string: HTMLParser.resolveURL(feed.member.avatarNormal)))
                 .downsampling(size: CGSize(width: 72, height: 72))
                 .cacheOriginalImage()
                 .fade(duration: 0.15)

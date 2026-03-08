@@ -11,7 +11,11 @@ struct XnaFeedView: View {
     var body: some View {
         List {
             ForEach(feeds) { feed in
-                Link(destination: URL(string: feed.url)!) {
+                if let url = URL(string: feed.url) {
+                    Link(destination: url) {
+                        XnaFeedRow(feed: feed)
+                    }
+                } else {
                     XnaFeedRow(feed: feed)
                 }
             }
@@ -60,7 +64,7 @@ struct XnaFeedRow: View {
                 .lineLimit(2)
 
             HStack(spacing: 8) {
-                KFImage(URL(string: feed.member.avatarMini))
+                KFImage(URL(string: HTMLParser.resolveURL(feed.member.avatarMini)))
                     .resizable()
                     .frame(width: 20, height: 20)
                     .clipShape(Circle())

@@ -11,10 +11,11 @@ struct AutoSizingWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
 
-        // Add message handler for height updates
+        // Add message handler for height updates (使用弱引用代理避免循环引用)
         let userContentController = WKUserContentController()
-        userContentController.add(context.coordinator, name: "heightChanged")
-        userContentController.add(context.coordinator, name: "imageTapped")
+        let leakAvoider = LeakAvoider(delegate: context.coordinator)
+        userContentController.add(leakAvoider, name: "heightChanged")
+        userContentController.add(leakAvoider, name: "imageTapped")
         config.userContentController = userContentController
 
         let webView = WKWebView(frame: .zero, configuration: config)
@@ -24,6 +25,10 @@ struct AutoSizingWebView: UIViewRepresentable {
         webView.scrollView.bounces = false
         webView.navigationDelegate = context.coordinator
         return webView
+    }
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.configuration.userContentController.removeAllScriptMessageHandlers()
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
@@ -112,7 +117,7 @@ struct AutoSizingWebView: UIViewRepresentable {
     }
 
     class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
-        let parent: AutoSizingWebView
+        var parent: AutoSizingWebView
         var lastHTML = ""
 
         init(parent: AutoSizingWebView) {
@@ -143,5 +148,18 @@ struct AutoSizingWebView: UIViewRepresentable {
             }
             return .allow
         }
+    }
+}
+
+/// 弱引用代理，避免 WKUserContentController 对 Coordinator 的强引用循环
+private class LeakAvoider: NSObject, WKScriptMessageHandler {
+    weak var delegate: WKScriptMessageHandler?
+
+    init(delegate: WKScriptMessageHandler) {
+        self.delegate = delegate
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        delegate?.userContentController(userContentController, didReceive: message)
     }
 }
