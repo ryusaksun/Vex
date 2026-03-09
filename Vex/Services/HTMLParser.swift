@@ -70,7 +70,7 @@ enum HTMLParser {
         guard href.contains("/t/") else { return nil }
 
         // Extract numbers from href: /t/{id}#reply{count}
-        let numbers = href.matches(of: /\d+/).map { Int(String($0.output))! }
+        let numbers = href.matches(of: /\d+/).compactMap { Int(String($0.output)) }
         guard let topicId = numbers.first else { return nil }
 
         let replies = numbers.count > 1 ? numbers[1] : 0
@@ -85,7 +85,11 @@ enum HTMLParser {
         let href = try el.attr("href")
         guard href.contains("/go/") else { return nil }
 
-        let name = href.replacingOccurrences(of: "/go/", with: "")
+        var name = href.replacingOccurrences(of: "/go/", with: "")
+        // 移除查询参数（如 ?p=1）
+        if let queryIndex = name.firstIndex(of: "?") {
+            name = String(name[..<queryIndex])
+        }
         let title = try el.text()
         return NodeBasic(name: name, title: title)
     }
@@ -235,7 +239,6 @@ enum HTMLParser {
         }
 
         // Replies count
-        let repliesText = try doc.select(".cell[id^=r_]").text()
         let repliesCountText = try wrapper.select(".box .cell:has(.gray)").text()
         var replies = 0
         if let match = repliesCountText.firstMatch(of: /(\d+)\s*条回复/) {
@@ -402,7 +405,13 @@ enum HTMLParser {
     static func parseNodeDetail(_ doc: Document, name: String) throws -> NodeDetail {
         let avatarLarge = try doc.select(".page-content-header img").attr("src")
         let breadcrumb = try doc.select(".node-breadcrumb").text()
-        let title = breadcrumb.split(separator: " ").last.map(String.init) ?? name
+        // breadcrumb 格式："V2EX › 节点标题"，用 "›" 分隔取最后部分
+        let title: String
+        if let separatorRange = breadcrumb.range(of: "›") {
+            title = breadcrumb[separatorRange.upperBound...].trimmingCharacters(in: .whitespaces)
+        } else {
+            title = breadcrumb.isEmpty ? name : breadcrumb
+        }
         let header = try doc.select(".intro").html()
         let topicsText = try doc.select(".topic-count strong").text()
         let topics = Int(topicsText) ?? 0
@@ -449,9 +458,10 @@ enum HTMLParser {
         let pageText = try doc.select(".page_current").text()
         var pagination = Pagination(current: 1, total: 1)
         if !pageText.isEmpty {
+            let current = Int(pageText) ?? 1
             let normalPages = try doc.select(".page_normal")
             let total = normalPages.isEmpty() ? 1 : (Int(try normalPages.last()?.text() ?? "1") ?? 1)
-            pagination = Pagination(current: Int(pageText) ?? 1, total: total)
+            pagination = Pagination(current: current, total: max(total, current))
         }
 
         return (feeds, pagination)
@@ -603,10 +613,9 @@ enum HTMLParser {
         }
 
         let pageText = try doc.select(".page_current").text()
-        let pagination = Pagination(
-            current: Int(pageText) ?? 1,
-            total: Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
-        )
+        let current = Int(pageText) ?? 1
+        let total = Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
+        let pagination = Pagination(current: current, total: max(total, current))
 
         return (topics, pagination)
     }
@@ -642,10 +651,9 @@ enum HTMLParser {
         }
 
         let pageText = try doc.select(".page_current").text()
-        let pagination = Pagination(
-            current: Int(pageText) ?? 1,
-            total: Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
-        )
+        let current = Int(pageText) ?? 1
+        let total = Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
+        let pagination = Pagination(current: current, total: max(total, current))
 
         return (replies, pagination)
     }
@@ -679,10 +687,9 @@ enum HTMLParser {
         }
 
         let pageText = try doc.select(".page_current").text()
-        let pagination = Pagination(
-            current: Int(pageText) ?? 1,
-            total: Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
-        )
+        let current = Int(pageText) ?? 1
+        let total = Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
+        let pagination = Pagination(current: current, total: max(total, current))
 
         return (records, pagination)
     }

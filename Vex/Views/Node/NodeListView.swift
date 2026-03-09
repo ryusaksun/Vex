@@ -43,9 +43,6 @@ struct NodeListView: View {
         .listStyle(.plain)
         .searchable(text: $searchText, prompt: "搜索节点")
         .navigationTitle("节点")
-        .navigationDestination(for: NodeBasic.self) { node in
-            NodeDetailView(nodeName: node.name, brief: node)
-        }
         .refreshable {
             await loadGroups()
         }

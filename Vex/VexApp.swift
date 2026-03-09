@@ -30,6 +30,12 @@ struct VexApp: App {
                 .task {
                     await authManager.checkAuth()
                 }
+                .onChange(of: cloudflareManager.needsVerification) {
+                    // Cloudflare 验证完成后重新检查认证状态
+                    if !cloudflareManager.needsVerification {
+                        Task { await authManager.checkAuth(forceRefresh: true) }
+                    }
+                }
                 .onOpenURL { url in
                     DeepLinkHandler.handle(url: url, router: router)
                 }

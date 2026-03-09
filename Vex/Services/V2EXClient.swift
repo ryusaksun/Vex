@@ -74,12 +74,13 @@ final class V2EXClient: ObservableObject {
             throw V2EXError.unexpectedResponse("Not HTTP response")
         }
 
-        // Handle 403
+        // Handle 403 (Cloudflare challenge)
         if httpResponse.statusCode == 403 {
             error403Count += 1
             if error403Count >= 3 {
                 shouldPrepareFetch = true
             }
+            throw V2EXError.unexpectedResponse("访问被拒绝 (403)，可能需要完成 Cloudflare 验证")
         } else {
             error403Count = 0
         }
@@ -149,9 +150,12 @@ final class V2EXClient: ObservableObject {
     // MARK: - ONCE Token
 
     func getOnce() async throws -> String {
-        if let cached = cachedOnce { return cached }
+        if let cached = cachedOnce, !cached.isEmpty { return cached }
         let (data, _) = try await request(path: "/poll_once")
         let once = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !once.isEmpty else {
+            throw V2EXError.unexpectedResponse("无法获取 ONCE token")
+        }
         cachedOnce = once
         return once
     }
@@ -177,10 +181,11 @@ final class V2EXClient: ObservableObject {
         let doc = try await fetchHTML(path: "/recent?p=\(page)&d=\(timestamp)")
         let feeds = try HTMLParser.parseHomeFeeds(doc)
         let pageText = try doc.select(".page_current").text()
+        let current = Int(pageText) ?? page
         let total = Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
         return PaginatedResponse(
             data: feeds,
-            pagination: Pagination(current: Int(pageText) ?? page, total: total)
+            pagination: Pagination(current: current, total: max(total, current))
         )
     }
 
@@ -340,6 +345,11 @@ final class V2EXClient: ObservableObject {
             ]
         )
         invalidateOnce()
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let success = json["success"] as? Bool, !success {
+            let message = json["message"] as? String ?? "操作失败"
+            throw V2EXError.unexpectedResponse(message)
+        }
     }
 
     func createTopic(title: String, content: String?, nodeName: String, syntax: String = "default") async throws -> TopicDetail {
@@ -390,12 +400,14 @@ final class V2EXClient: ObservableObject {
     }
 
     func getNodeDetail(name: String) async throws -> NodeDetail {
-        let doc = try await fetchHTML(path: "/go/\(name)")
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let doc = try await fetchHTML(path: "/go/\(encodedName)")
         return try HTMLParser.parseNodeDetail(doc, name: name)
     }
 
     func getNodeFeeds(name: String, page: Int = 1) async throws -> PaginatedResponse<NodeTopicFeed> {
-        let doc = try await fetchHTML(path: "/go/\(name)?p=\(page)")
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let doc = try await fetchHTML(path: "/go/\(encodedName)?p=\(page)")
         let result = try HTMLParser.parseNodeFeeds(doc)
         return PaginatedResponse(data: result.feeds, pagination: result.pagination)
     }
@@ -420,17 +432,20 @@ final class V2EXClient: ObservableObject {
     // MARK: - Members
 
     func getMemberDetail(username: String) async throws -> (detail: MemberDetail, meta: MemberMeta) {
+        let encodedUsername = username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? username
         let detail: MemberDetail = try await fetchJSON(
-            path: "/api/members/show.json?username=\(username)",
+            path: "/api/members/show.json?username=\(encodedUsername)",
             type: MemberDetail.self
         )
-        let doc = try await fetchHTML(path: "/member/\(username)")
+        let encodedPath = username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username
+        let doc = try await fetchHTML(path: "/member/\(encodedPath)")
         let meta = try HTMLParser.parseUserMeta(doc)
         return (detail, meta)
     }
 
     func getMemberTopics(username: String, page: Int = 1) async throws -> PaginatedResponse<MemberTopicFeed> {
-        let doc = try await fetchHTML(path: "/member/\(username)/topics?p=\(page)")
+        let encoded = username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username
+        let doc = try await fetchHTML(path: "/member/\(encoded)/topics?p=\(page)")
 
         // Check locked
         if try !doc.select(".member-locked").isEmpty() {
@@ -463,15 +478,17 @@ final class V2EXClient: ObservableObject {
         }
 
         let pageText = try doc.select(".page_current").text()
+        let current = Int(pageText) ?? page
         let total = Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
         return PaginatedResponse(
             data: feeds,
-            pagination: Pagination(current: Int(pageText) ?? page, total: total)
+            pagination: Pagination(current: current, total: max(total, current))
         )
     }
 
     func getMemberReplies(username: String, page: Int = 1) async throws -> PaginatedResponse<RepliedTopicFeed> {
-        let doc = try await fetchHTML(path: "/member/\(username)/replies?p=\(page)")
+        let encoded = username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username
+        let doc = try await fetchHTML(path: "/member/\(encoded)/replies?p=\(page)")
         let result = try HTMLParser.parseMemberReplies(doc)
         return PaginatedResponse(data: result.replies, pagination: result.pagination)
     }
@@ -565,8 +582,9 @@ final class V2EXClient: ObservableObject {
         // 请求首页以获取用户名和余额（/about 页面没有 balance_area）
         let doc = try await fetchHTML(path: "/")
         guard let username = try HTMLParser.parseCurrentUsername(doc) else { return nil }
+        let encoded = username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? username
         return try await fetchJSON(
-            path: "/api/members/show.json?username=\(username)",
+            path: "/api/members/show.json?username=\(encoded)",
             type: MemberDetail.self
         )
     }

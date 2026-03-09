@@ -31,16 +31,18 @@ struct ImageGalleryView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button {
-                            saveImage()
+                    if imageURLs.indices.contains(selectedIndex) {
+                        Menu {
+                            Button {
+                                saveImage()
+                            } label: {
+                                Label("保存图片", systemImage: "square.and.arrow.down")
+                            }
+                            ShareLink(item: imageURLs[selectedIndex])
                         } label: {
-                            Label("保存图片", systemImage: "square.and.arrow.down")
+                            Image(systemName: "ellipsis.circle")
+                                .foregroundStyle(.white)
                         }
-                        ShareLink(item: imageURLs[selectedIndex])
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .foregroundStyle(.white)
                     }
                 }
 
@@ -57,6 +59,7 @@ struct ImageGalleryView: View {
     }
 
     private func saveImage() {
+        guard imageURLs.indices.contains(selectedIndex) else { return }
         let url = imageURLs[selectedIndex]
         KingfisherManager.shared.retrieveImage(with: url) { result in
             if case .success(let value) = result {

@@ -53,16 +53,20 @@ struct CloudflareWebView: UIViewRepresentable {
 
     class Coordinator: NSObject, WKNavigationDelegate {
         let onCompleted: () -> Void
+        private var hasCompleted = false
 
         init(onCompleted: @escaping () -> Void) {
             self.onCompleted = onCompleted
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard !hasCompleted else { return }
             // Check if we passed Cloudflare challenge
-            webView.evaluateJavaScript("document.title") { title, _ in
+            webView.evaluateJavaScript("document.title") { [weak self] title, _ in
+                guard let self, !self.hasCompleted else { return }
                 if let title = title as? String,
                    !title.lowercased().contains("just a moment") {
+                    self.hasCompleted = true
                     // Sync cookies，确保完成后再回调
                     WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
                         for cookie in cookies {

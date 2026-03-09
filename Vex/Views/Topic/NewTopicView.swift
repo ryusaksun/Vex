@@ -78,9 +78,11 @@ struct NewTopicView: View {
             )
             HapticManager.notification(.success)
             alert.show(.success, "发布成功")
+            let topicId = topic.id
             dismiss()
-            // Navigate to new topic
-            router.navigateToTopic(id: topic.id)
+            // 延迟导航，等待 sheet dismiss 动画完成
+            try? await Task.sleep(for: .milliseconds(500))
+            router.navigateToTopic(id: topicId)
         } catch {
             HapticManager.notification(.error)
             alert.show(.error, error.localizedDescription)

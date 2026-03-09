@@ -5,6 +5,8 @@ struct NodeDetailView: View {
     let nodeName: String
     var brief: NodeBasic?
 
+    @Environment(AlertManager.self) private var alert
+
     @State private var node: NodeDetail?
     @State private var feeds: [NodeTopicFeed] = []
     @State private var currentPage = 1
@@ -115,8 +117,8 @@ struct NodeDetailView: View {
             currentPage = response.pagination.current
             totalPages = response.pagination.total
 
-            // Also load node detail
-            if node == nil {
+            // Load/refresh node detail
+            if node == nil || page == 1 {
                 node = try await client.getNodeDetail(name: nodeName)
             }
         } catch {
@@ -139,8 +141,9 @@ struct NodeDetailView: View {
                 try await client.collectNode(name: nodeName)
             }
             node?.collected.toggle()
+            HapticManager.notification(.success)
         } catch {
-            self.error = error.localizedDescription
+            alert.show(.error, error.localizedDescription)
         }
     }
 }

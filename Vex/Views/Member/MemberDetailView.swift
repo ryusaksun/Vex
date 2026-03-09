@@ -61,6 +61,12 @@ struct MemberDetailView: View {
         .overlay {
             if isLoading && detail == nil {
                 LottieLoadingView()
+            } else if let error, detail == nil {
+                ContentUnavailableView(
+                    "加载失败",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(error)
+                )
             }
         }
         .task {

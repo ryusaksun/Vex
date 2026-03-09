@@ -16,6 +16,7 @@ struct TopicDetailView: View {
     @State private var currentPage = 1
     @State private var totalPages = 1
     @State private var isLoading = false
+    @State private var isLoadingMore = false
     @State private var error: String?
 
     // Sheets
@@ -89,7 +90,7 @@ struct TopicDetailView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .disabled(isLoading)
+                        .disabled(isLoadingMore)
                     }
                 }
             }
@@ -294,11 +295,16 @@ struct TopicDetailView: View {
             if let topic {
                 viewedTopics.markViewed(topic: topic)
             }
-            let result = try await client.getTopicReplies(id: topicId, page: 1)
-            replies = result.replies
-            currentPage = result.pagination.current
-            totalPages = result.pagination.total
-            updateConversationIds()
+            do {
+                let result = try await client.getTopicReplies(id: topicId, page: 1)
+                replies = result.replies
+                currentPage = result.pagination.current
+                totalPages = result.pagination.total
+                updateConversationIds()
+            } catch {
+                // 帖子已加载但回复加载失败，用 alert 提示而非覆盖 error overlay
+                alert.show(.error, "回复加载失败：\(error.localizedDescription)")
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -306,9 +312,9 @@ struct TopicDetailView: View {
     }
 
     private func loadMoreReplies() async {
-        guard !isLoading, currentPage < totalPages else { return }
+        guard !isLoadingMore, currentPage < totalPages else { return }
 
-        isLoading = true
+        isLoadingMore = true
         let nextPage = currentPage + 1
         do {
             let result = try await client.getTopicReplies(id: topicId, page: nextPage)
@@ -317,9 +323,9 @@ struct TopicDetailView: View {
             totalPages = result.pagination.total
             updateConversationIds()
         } catch {
-            self.error = error.localizedDescription
+            alert.show(.error, "加载更多回复失败：\(error.localizedDescription)")
         }
-        isLoading = false
+        isLoadingMore = false
     }
 
     private func updateConversationIds() {

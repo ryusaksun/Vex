@@ -148,6 +148,7 @@ struct ContentView: View {
             .padding(.trailing, 20)
             .padding(.bottom, 80)
             .offset(y: showFAB && router.homeBarsVisible ? 0 : 200)
+            .animation(.easeInOut(duration: 0.2), value: showFAB)
             .animation(.easeInOut(duration: 0.2), value: router.homeBarsVisible)
         }
     }

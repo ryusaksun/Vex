@@ -96,7 +96,7 @@ struct BalanceBrief: Codable, Hashable, Sendable {
 }
 
 struct BalanceRecord: Codable, Hashable, Identifiable, Sendable {
-    var id: String { "\(type)-\(time)-\(amount)" }
+    var id: String { "\(type)-\(time)-\(amount)-\(balance)-\(description)" }
     let type: String
     let time: String
     let amount: String

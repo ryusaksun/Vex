@@ -657,7 +657,11 @@ private enum HTMLBlockCache {
 
     static func store(_ blocks: [HTMLBlock], for html: String) {
         if cache.count >= maxEntries {
-            cache.removeAll(keepingCapacity: true)
+            // 随机淘汰一半，避免全部清空导致缓存命中率骤降
+            let keysToRemove = Array(cache.keys.prefix(maxEntries / 2))
+            for key in keysToRemove {
+                cache.removeValue(forKey: key)
+            }
         }
         cache[html] = blocks
     }
