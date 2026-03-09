@@ -4,6 +4,7 @@ struct NodeListView: View {
     @State private var groups: [NodeGroup] = []
     @State private var isLoading = false
     @State private var searchText = ""
+    @State private var error: String?
 
     private let client = V2EXClient.shared
 
@@ -50,7 +51,13 @@ struct NodeListView: View {
         }
         .overlay {
             if isLoading && groups.isEmpty {
-                ProgressView()
+                LottieLoadingView()
+            } else if let error, groups.isEmpty {
+                ContentUnavailableView(
+                    "加载失败",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(error)
+                )
             }
         }
         .task {
@@ -60,9 +67,12 @@ struct NodeListView: View {
 
     private func loadGroups() async {
         isLoading = true
+        error = nil
         do {
             groups = try await client.getNodeGroups()
-        } catch {}
+        } catch {
+            self.error = error.localizedDescription
+        }
         isLoading = false
     }
 }

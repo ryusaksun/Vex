@@ -16,6 +16,9 @@ packages:
   MarkdownUI:
     url: https://github.com/gonzalezreal/swift-markdown-ui.git
     from: "2.4.0"
+  Lottie:
+    url: https://github.com/airbnb/lottie-ios.git
+    from: "4.4.0"
 
 targets:
   Vex:
@@ -35,11 +38,15 @@ targets:
       - package: SwiftSoup
       - package: Kingfisher
       - package: MarkdownUI
+      - package: Lottie
 
   VexTests:
     type: bundle.unit-test
     platform: iOS
     sources:
       - VexTests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: Vex

@@ -7,6 +7,7 @@ struct BalanceView: View {
     @State private var currentPage = 1
     @State private var totalPages = 1
     @State private var isLoading = false
+    @State private var error: String?
 
     private let client = V2EXClient.shared
 
@@ -82,41 +83,53 @@ struct BalanceView: View {
                     Button("加载更多") {
                         Task { await loadMore() }
                     }
+                    .disabled(isLoading)
                 }
             }
         }
         .navigationTitle("账户余额")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
-            currentPage = 1
-            await loadRecords()
+            await loadRecords(page: 1)
         }
         .overlay {
             if isLoading && records.isEmpty {
-                ProgressView()
+                LottieLoadingView()
+            } else if let error, records.isEmpty {
+                ContentUnavailableView(
+                    "加载失败",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(error)
+                )
             }
         }
         .task {
-            await loadRecords()
+            await loadRecords(page: 1)
         }
     }
 
-    private func loadRecords() async {
+    private func loadRecords(page: Int) async {
         isLoading = true
+        if page == 1 {
+            error = nil
+        }
         do {
-            let response = try await client.getBalanceRecords(page: currentPage)
-            if currentPage == 1 {
+            let response = try await client.getBalanceRecords(page: page)
+            if page == 1 {
                 records = response.data
             } else {
                 records.append(contentsOf: response.data)
             }
+            currentPage = response.pagination.current
             totalPages = response.pagination.total
-        } catch {}
+        } catch {
+            self.error = error.localizedDescription
+        }
         isLoading = false
     }
 
     private func loadMore() async {
-        currentPage += 1
-        await loadRecords()
+        guard !isLoading, currentPage < totalPages else { return }
+        await loadRecords(page: currentPage + 1)
     }
 }

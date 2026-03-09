@@ -5,13 +5,16 @@ struct HomeView: View {
     @Environment(FavoriteNodesManager.self) private var favoriteNodes
     @Environment(AuthManager.self) private var auth
     @Environment(Router.self) private var router
+    @EnvironmentObject private var settings: AppSettingsManager
 
     @State private var tabs: [HomeTabOption] = []
-    @State private var selectedTab = "all"
+    @AppStorage("home_selected_tab") private var selectedTab = "all"
     @State private var feeds: [HomeTopicFeed] = []
     @State private var isLoading = false
     @State private var error: String?
     @State private var showProfile = false
+    @State private var skipNextSelectedTabChange = false
+    @State private var didLoadInitialFeeds = false
 
     private let client = V2EXClient.shared
 
@@ -25,10 +28,11 @@ struct HomeView: View {
             if selectedTab == "xna" {
                 XnaFeedView()
             } else {
-                ScrollView {
+                LottieRefreshableScrollView {
+                    await loadFeeds()
+                } content: {
                     if isLoading && feeds.isEmpty {
-                        TopicListSkeleton()
-                            .padding(.horizontal)
+                        LottieLoadingView()
                     } else {
                         LazyVStack(spacing: 0) {
                             ForEach(feeds) { feed in
@@ -39,31 +43,6 @@ struct HomeView: View {
                             }
                         }
                         .padding(.horizontal)
-                    }
-                }
-                .refreshable {
-                    await loadFeeds()
-                }
-                .onScrollGeometryChange(for: Bool.self) { geo in
-                    geo.contentOffset.y > 60
-                } action: { _, isPastThreshold in
-                    if !isPastThreshold {
-                        router.homeBarsVisible = true
-                    }
-                }
-                .onScrollPhaseChange { _, newPhase in
-                    if newPhase == .idle {
-                        router.homeBarsVisible = true
-                    }
-                }
-                .onScrollGeometryChange(for: CGFloat.self) { geo in
-                    geo.contentOffset.y
-                } action: { oldValue, newValue in
-                    let delta = newValue - oldValue
-                    guard abs(delta) > 8 else { return }
-                    let shouldShow = delta < 0
-                    if shouldShow != router.homeBarsVisible {
-                        router.homeBarsVisible = shouldShow
                     }
                 }
                 .overlay {
@@ -77,9 +56,6 @@ struct HomeView: View {
                 }
             }
         }
-        .toolbar(router.homeBarsVisible ? .visible : .hidden, for: .navigationBar)
-        .toolbar(router.homeBarsVisible && router.homePath.isEmpty ? .visible : .hidden, for: .tabBar)
-        .animation(.easeInOut(duration: 0.2), value: router.homeBarsVisible)
         .navigationTitle(selectedTabLabel)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -87,7 +63,10 @@ struct HomeView: View {
                     Button {
                         showProfile = true
                     } label: {
-                        if let user = auth.user, let urlStr = user.avatarLarge, let url = URL(string: urlStr) {
+                        if settings.showAvatar,
+                           let user = auth.user,
+                           let urlStr = user.avatarLarge,
+                           let url = URL(string: urlStr) {
                             KFImage(url)
                                 .resizable()
                                 .frame(width: 28, height: 28)
@@ -143,18 +122,22 @@ struct HomeView: View {
                         }
                     }
             }
+            .toastOverlay()
         }
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            guard !didLoadInitialFeeds else { return }
             await loadTabs()
-            // loadFeeds 会由 loadTabs 修改 selectedTab 后通过 onChange 触发
-            // 如果 selectedTab 未变（仍为 "all"），则手动加载
+            didLoadInitialFeeds = true
             if feeds.isEmpty && selectedTab != "xna" {
                 await loadFeeds()
             }
         }
         .onChange(of: selectedTab) {
-            router.homeBarsVisible = true
+            if skipNextSelectedTabChange {
+                skipNextSelectedTabChange = false
+                return
+            }
             if selectedTab != "xna" {
                 Task { await loadFeeds() }
             }
@@ -164,7 +147,10 @@ struct HomeView: View {
     private func loadTabs() async {
         do {
             tabs = try await client.getHomeTabs()
-            if let first = tabs.first {
+            // 持久化的 tab 不在可用列表中时，回退到第一个
+            if !tabs.contains(where: { $0.value == selectedTab }),
+               let first = tabs.first {
+                skipNextSelectedTabChange = true
                 selectedTab = first.value
             }
         } catch {

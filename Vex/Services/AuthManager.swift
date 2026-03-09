@@ -41,11 +41,13 @@ final class AuthManager {
                     balance = client.balanceBrief
                 }
             } else {
+                clearSessionState()
                 status = .visitor
             }
             lastFetchedAt = Date()
         } catch {
             if case V2EXError.authRequired = error {
+                clearSessionState()
                 status = .visitor
             } else {
                 status = .failed
@@ -55,10 +57,8 @@ final class AuthManager {
 
     func logout() async {
         await client.logout()
-        user = nil
+        clearSessionState()
         status = .logout
-        unreadCount = 0
-        balance = nil
         lastFetchedAt = nil
     }
 
@@ -73,5 +73,11 @@ final class AuthManager {
     func refreshUnreadCount() {
         unreadCount = client.unreadCount
         balance = client.balanceBrief
+    }
+
+    private func clearSessionState() {
+        user = nil
+        unreadCount = 0
+        balance = nil
     }
 }

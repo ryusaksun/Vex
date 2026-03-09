@@ -36,6 +36,19 @@ struct ThemeSettingsView: View {
                         }
                     }
                 }
+
+                // 自定义颜色
+                HStack {
+                    ColorPicker("自定义颜色", selection: Binding(
+                        get: { theme.customColor },
+                        set: { theme.customColor = $0 }
+                    ), supportsOpacity: false)
+                    Spacer()
+                    if theme.accentColorName == "custom" {
+                        Image(systemName: "checkmark")
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
             }
 
             Section("字体大小") {

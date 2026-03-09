@@ -29,15 +29,13 @@ struct Sov2exSearchView: View {
                     Task { await loadMore() }
                 }
                 .frame(maxWidth: .infinity)
+                .disabled(isLoading)
             }
         }
         .listStyle(.plain)
-        .navigationDestination(for: TopicBasic.self) { topic in
-            TopicDetailView(topicId: topic.id, brief: topic)
-        }
         .overlay {
             if isLoading && results.isEmpty {
-                ProgressView()
+                LottieLoadingView()
             }
             if let error, results.isEmpty {
                 ContentUnavailableView(
@@ -54,38 +52,46 @@ struct Sov2exSearchView: View {
                 )
             }
         }
-        .onChange(of: query) {
+        .task(id: query) {
             from = 0
             results = []
             hasMore = true
-            Task { await search() }
-        }
-        .task {
-            await search()
+            error = nil
+            await search(query: query, from: 0, append: false)
         }
     }
 
-    private func search() async {
-        guard !query.isEmpty else { return }
+    private func search(query: String, from requestedFrom: Int, append: Bool) async {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            isLoading = false
+            return
+        }
+
         isLoading = true
         error = nil
+        defer { isLoading = false }
+
         do {
-            let hits = try await client.search(query: query, from: from, size: pageSize)
-            if from == 0 {
-                results = hits
-            } else {
+            let hits = try await client.search(query: trimmedQuery, from: requestedFrom, size: pageSize)
+            guard !Task.isCancelled else { return }
+
+            if append {
                 results.append(contentsOf: hits)
+            } else {
+                results = hits
             }
+            from = requestedFrom
             hasMore = hits.count >= pageSize
         } catch {
+            guard !Task.isCancelled else { return }
             self.error = error.localizedDescription
         }
-        isLoading = false
     }
 
     private func loadMore() async {
-        from += pageSize
-        await search()
+        guard !isLoading, hasMore else { return }
+        await search(query: query, from: from + pageSize, append: true)
     }
 }
 

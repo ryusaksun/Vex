@@ -42,6 +42,7 @@ xcodebuild test -scheme VexTests -destination 'platform=iOS Simulator,name=iPhon
 - **SwiftSoup** — HTML 解析
 - **Kingfisher** — 图片加载与缓存
 - **MarkdownUI** — Markdown 渲染
+- **Lottie** — 加载/刷新动画（`Vex/Resources/*.lottie`）
 
 ## Architecture
 
@@ -49,8 +50,9 @@ xcodebuild test -scheme VexTests -destination 'platform=iOS Simulator,name=iPhon
 V2EX 没有可用的 REST API，所有数据通过 **HTML 抓取 + SwiftSoup 解析**获取。`V2EXClient` 使用 URLSession 发请求，`HTMLParser` 负责从 DOM 中提取结构化数据。原版 React Native 实现位于 `/Users/ryuichi/Documents/GitHub/v2ex-react-native`，可作为参考。
 
 ### 状态管理
-- `@Observable` 宏用于跨视图共享状态（所有 Manager 类）
-- `@Environment` 在 `VexApp.swift` 根级注入依赖
+- `@Observable` + `@Environment`：大多数 Manager（`AuthManager`、`Router`、`AlertManager` 等），在 `VexApp.swift` 根级用 `.environment()` 注入
+- `ObservableObject` + `@EnvironmentObject`：`ThemeManager`、`AppSettingsManager`（因依赖 `@AppStorage`，与 `@Observable` 不兼容），用 `.environmentObject()` 注入
+- `V2EXClient` 是 `ObservableObject`，但未注入环境，各 View 直接调用其静态/实例方法
 - `actor CacheManager` 保证线程安全的缓存
 
 ### 导航
@@ -58,6 +60,7 @@ V2EX 没有可用的 REST API，所有数据通过 **HTML 抓取 + SwiftSoup 解
 - iPad: SidebarView（通过 `horizontalSizeClass` 切换）
 - 深度链接：`vex://t/{id}`, `vex://go/{node}`, `vex://member/{username}`
 - `Router` 通过 `homeBarsVisible` 控制主页滚动时导航栏/Tab Bar/FAB 的联动隐藏
+- 所有 NavigationStack 共享 `.commonNavigationDestinations()` 扩展，统一注册 `TopicBasic`/`MemberBasic`/`NodeBasic` 的目标视图
 
 ### 核心 Services
 | 文件 | 职责 |
@@ -73,7 +76,15 @@ V2EX 没有可用的 REST API，所有数据通过 **HTML 抓取 + SwiftSoup 解
 | `ViewedTopicsManager.swift` | 浏览历史追踪 |
 
 ### HTML 内容渲染
-`HTMLContentView` 使用原生 SwiftUI 渲染 HTML 内容（非 WKWebView），通过 SwiftSoup 解析为 `HTMLBlock` 枚举（text/image/codeBlock/blockquote），文本使用 `AttributedString` + `InlinePresentationIntent`。TextNode 需要折叠空白（HTML 规范）。
+`HTMLContentView` 使用原生 SwiftUI 渲染 HTML 内容（非 WKWebView），但含 `embedded_image` 的内容会回退到 `AutoSizingWebView`（WKWebView）。整个渲染管线集中在 `HTMLContentView.swift` 中：
+
+1. `HTMLContentPreprocessor.normalize()` — 预处理：修复转义的 img 标签、孤立图片属性、Markdown 图片语法等畸形 HTML
+2. `HTMLBlockParser.parse()` — 解析为 `HTMLBlock` 枚举（text/image/inline/codeBlock/blockquote）
+3. `HTMLContentView` — 渲染各 block 类型；单文本块有快速路径优化
+
+文本使用 `AttributedString` + `InlinePresentationIntent`，TextNode 需要折叠空白（HTML 规范）。`HTMLImageLayout` 和 `HTMLInlineImageLayout` 控制图片尺寸计算。
+
+测试辅助：`HTMLContentParserTestSupport.blockKinds(for:)` 用于测试解析结果。
 
 ### 帖子详情页
 - 回复输入框直接内联在底部（`TopicBottomBar`），不使用 sheet

@@ -218,11 +218,20 @@ enum HTMLParser {
         var createdTime = ""
         var clicks = 0
         let metaParts = metaText.split(separator: "·").map { $0.trimmingCharacters(in: .whitespaces) }
-        if metaParts.count >= 2 {
-            createdTime = metaParts[1]
-        }
         if let clickMatch = metaText.firstMatch(of: /(\d+)\s*次点击/) {
             clicks = Int(clickMatch.1) ?? 0
+        }
+        // 匹配时间：包含"前"（如 "5 小时前"）或日期格式（如 "2024-01-01"）
+        for part in metaParts {
+            if part.contains("前") || part.contains("-") && part.first?.isNumber == true {
+                // 处理 "By xxx at 8 小时前" 格式，只取 "at " 之后的时间
+                if let atRange = part.range(of: " at ") {
+                    createdTime = String(part[atRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+                } else {
+                    createdTime = part
+                }
+                break
+            }
         }
 
         // Replies count
@@ -302,8 +311,9 @@ enum HTMLParser {
         // Content
         let contentRendered = try el.select(".reply_content").html()
 
-        // Reply time & device
-        let metaText = try el.select("td:nth-child(3) span.fade.small").text()
+        // Reply time & device — 只取第一个 span.fade.small（时间），排除 thank_area 里的
+        let timeSpans = try el.select("td:nth-child(3) > span.fade.small")
+        let metaText = try timeSpans.first()?.text() ?? ""
         let metaParts = metaText.split(separator: " via ", maxSplits: 1)
         let replyTime = metaParts.first.map(String.init) ?? ""
         let replyDevice = metaParts.count > 1 ? String(metaParts[1]) : nil

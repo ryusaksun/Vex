@@ -8,40 +8,49 @@ struct NotificationListView: View {
     @State private var currentPage = 1
     @State private var totalPages = 1
     @State private var isLoading = false
+    @State private var error: String?
 
     private let client = V2EXClient.shared
 
     var body: some View {
         Group {
             if auth.isAuthed {
-                List {
-                    ForEach(notifications) { notification in
-                        NavigationLink(value: notification.topic) {
-                            NotificationRow(notification: notification)
+                LottieRefreshableScrollView {
+                    await loadNotifications(page: 1)
+                } content: {
+                    LazyVStack(spacing: 0) {
+                        ForEach(notifications) { notification in
+                            NavigationLink(value: notification.topic) {
+                                NotificationRow(notification: notification)
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+                            Divider()
                         }
-                    }
 
-                    if currentPage < totalPages {
-                        Button("加载更多") {
-                            Task { await loadMore() }
+                        if currentPage < totalPages {
+                            Button("加载更多") {
+                                Task { await loadMore() }
+                            }
+                            .padding()
+                            .disabled(isLoading)
                         }
                     }
-                }
-                .listStyle(.plain)
-                .navigationDestination(for: TopicBasic.self) { topic in
-                    TopicDetailView(topicId: topic.id, brief: topic)
-                }
-                .refreshable {
-                    currentPage = 1
-                    await loadNotifications()
                 }
                 .overlay {
                     if isLoading && notifications.isEmpty {
-                        ProgressView()
+                        LottieLoadingView()
+                    } else if let error, notifications.isEmpty {
+                        ContentUnavailableView(
+                            "加载失败",
+                            systemImage: "exclamationmark.triangle",
+                            description: Text(error)
+                        )
                     }
                 }
                 .task {
-                    await loadNotifications()
+                    await loadNotifications(page: 1)
                 }
             } else {
                 ContentUnavailableView(
@@ -55,35 +64,45 @@ struct NotificationListView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func loadNotifications() async {
+    private func loadNotifications(page: Int) async {
         isLoading = true
+        if page == 1 {
+            error = nil
+        }
         do {
-            let response = try await client.getNotifications(page: currentPage)
-            if currentPage == 1 {
+            let response = try await client.getNotifications(page: page)
+            if page == 1 {
                 notifications = response.data
             } else {
                 notifications.append(contentsOf: response.data)
             }
+            currentPage = response.pagination.current
             totalPages = response.pagination.total
-        } catch {}
+            auth.refreshUnreadCount()
+        } catch {
+            self.error = error.localizedDescription
+        }
         isLoading = false
     }
 
     private func loadMore() async {
-        currentPage += 1
-        await loadNotifications()
+        guard !isLoading, currentPage < totalPages else { return }
+        await loadNotifications(page: currentPage + 1)
     }
 }
 
 struct NotificationRow: View {
+    @EnvironmentObject private var settings: AppSettingsManager
     let notification: V2EXNotification
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            KFImage(URL(string: HTMLParser.resolveURL(notification.member.avatarNormal)))
-                .resizable()
-                .frame(width: 36, height: 36)
-                .clipShape(Circle())
+            if settings.showAvatar {
+                KFImage(URL(string: HTMLParser.resolveURL(notification.member.avatarNormal)))
+                    .resizable()
+                    .frame(width: 36, height: 36)
+                    .clipShape(Circle())
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -110,6 +129,7 @@ struct NotificationRow: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 2)
     }

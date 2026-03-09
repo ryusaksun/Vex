@@ -26,7 +26,7 @@ struct XnaFeedView: View {
         }
         .overlay {
             if isLoading && feeds.isEmpty {
-                ProgressView()
+                LottieLoadingView()
             }
             if let error, feeds.isEmpty {
                 ContentUnavailableView(
@@ -54,6 +54,7 @@ struct XnaFeedView: View {
 }
 
 struct XnaFeedRow: View {
+    @EnvironmentObject private var settings: AppSettingsManager
     let feed: XnaFeed
 
     var body: some View {
@@ -64,10 +65,12 @@ struct XnaFeedRow: View {
                 .lineLimit(2)
 
             HStack(spacing: 8) {
-                KFImage(URL(string: HTMLParser.resolveURL(feed.member.avatarMini)))
-                    .resizable()
-                    .frame(width: 20, height: 20)
-                    .clipShape(Circle())
+                if settings.showAvatar {
+                    KFImage(URL(string: HTMLParser.resolveURL(feed.member.avatarMini)))
+                        .resizable()
+                        .frame(width: 20, height: 20)
+                        .clipShape(Circle())
+                }
 
                 Text(feed.member.username)
                     .font(.caption)

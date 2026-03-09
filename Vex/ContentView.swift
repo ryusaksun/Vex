@@ -6,8 +6,10 @@ struct ContentView: View {
     @Environment(CloudflareManager.self) private var cloudflare
     @Environment(ClipboardWatcher.self) private var clipboard
     @EnvironmentObject private var settings: AppSettingsManager
+    @EnvironmentObject private var theme: ThemeManager
 
     @State private var showNewTopic = false
+    @State private var browserDestination: BrowserDestination?
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -22,6 +24,18 @@ struct ContentView: View {
         .toastOverlay()
         .sheet(isPresented: $showNewTopic) {
             NewTopicView()
+        }
+        .sheet(item: $browserDestination) { destination in
+            NavigationStack {
+                InAppBrowserView(url: destination.url)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("关闭") {
+                                browserDestination = nil
+                            }
+                        }
+                    }
+            }
         }
         .sheet(isPresented: Binding(
             get: { cloudflare.needsVerification },
@@ -70,6 +84,22 @@ struct ContentView: View {
             }
             cloudflare.checkIfNeeded()
         }
+        .environment(\.openURL, OpenURLAction { url in
+            if DeepLinkHandler.parse(url: url) != nil {
+                DeepLinkHandler.handle(url: url, router: router)
+                return .handled
+            }
+
+            guard settings.openLinksInApp,
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https"
+            else {
+                return .systemAction(url)
+            }
+
+            browserDestination = BrowserDestination(url: url)
+            return .handled
+        })
     }
 
     @ViewBuilder
@@ -81,6 +111,7 @@ struct ContentView: View {
                     HomeView()
                         .commonNavigationDestinations()
                 }
+                .toolbarVisibility(router.homePath.isEmpty ? .automatic : .hidden, for: .tabBar)
             }
 
             Tab("消息", systemImage: "bell", value: Router.Tab.notifications) {
@@ -88,6 +119,7 @@ struct ContentView: View {
                     NotificationListView()
                         .commonNavigationDestinations()
                 }
+                .toolbarVisibility(router.notificationsPath.isEmpty ? .automatic : .hidden, for: .tabBar)
             }
             .badge(auth.unreadCount)
 
@@ -96,6 +128,7 @@ struct ContentView: View {
                     SearchView()
                         .commonNavigationDestinations()
                 }
+                .toolbarVisibility(router.searchPath.isEmpty ? .automatic : .hidden, for: .tabBar)
             }
         }
         .overlay(alignment: .bottomTrailing) {
@@ -108,7 +141,7 @@ struct ContentView: View {
                     .fontWeight(.semibold)
                     .foregroundStyle(.white)
                     .frame(width: 56, height: 56)
-                    .background(Color.accentColor)
+                    .background(theme.accentColor)
                     .clipShape(Circle())
                     .shadow(radius: 4)
             }
@@ -116,9 +149,13 @@ struct ContentView: View {
             .padding(.bottom, 80)
             .offset(y: showFAB && router.homeBarsVisible ? 0 : 200)
             .animation(.easeInOut(duration: 0.2), value: router.homeBarsVisible)
-            .animation(.easeInOut(duration: 0.2), value: showFAB)
         }
     }
+}
+
+private struct BrowserDestination: Identifiable {
+    let url: URL
+    var id: String { url.absoluteString }
 }
 
 // MARK: - Common Navigation Destinations

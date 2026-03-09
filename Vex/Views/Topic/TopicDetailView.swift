@@ -9,6 +9,7 @@ struct TopicDetailView: View {
     @Environment(ViewedTopicsManager.self) private var viewedTopics
     @Environment(AuthManager.self) private var auth
     @Environment(AlertManager.self) private var alert
+    @EnvironmentObject private var settings: AppSettingsManager
 
     @State private var topic: TopicDetail?
     @State private var replies: [TopicReply] = []
@@ -78,7 +79,7 @@ struct TopicDetailView: View {
                                 conversationReply = reply
                             }
                         )
-                        Divider().padding(.leading, 50)
+                        Divider()
                     }
 
                     // Load more
@@ -88,6 +89,7 @@ struct TopicDetailView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding()
+                        .disabled(isLoading)
                     }
                 }
             }
@@ -110,9 +112,13 @@ struct TopicDetailView: View {
                     visible: barVisible,
                     onClearReplyTo: { replyTarget = nil },
                     onSubmitted: { newReply in
+                        replyTarget = nil
                         if let newReply {
                             replies.append(newReply)
                             topic?.replies += 1
+                            updateConversationIds()
+                        } else {
+                            Task { await loadTopic() }
                         }
                     }
                 )
@@ -195,19 +201,21 @@ struct TopicDetailView: View {
         }
         .overlay {
             if isLoading && topic == nil {
-                TopicDetailSkeleton()
+                LottieLoadingView()
+            } else if let error, topic == nil {
+                ContentUnavailableView(
+                    "加载失败",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(error)
+                )
             }
         }
         .sheet(item: $conversationReply) { reply in
             ConversationSheet(reply: reply, allReplies: replies)
         }
         .sheet(isPresented: $showEditSheet) {
-            if let topic {
-                TopicEditView(
-                    topicId: topicId,
-                    originalTitle: topic.title,
-                    originalContent: ""
-                )
+            TopicEditView(topicId: topicId) {
+                Task { await loadTopic() }
             }
         }
         .sheet(isPresented: $showShareSheet) {
@@ -215,7 +223,7 @@ struct TopicDetailView: View {
                 ShareSheet(items: [url])
             }
         }
-        .toolbar(.hidden, for: .tabBar)
+        // tab bar 隐藏由 ContentView NavigationStack 层统一控制
         .task {
             await loadTopic()
         }
@@ -226,26 +234,32 @@ struct TopicDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             // Author info
             HStack(spacing: 10) {
-                NavigationLink(value: topic.member) {
-                    KFImage(URL(string: HTMLParser.resolveURL(topic.member.avatarLarge)))
-                        .resizable()
-                        .frame(width: 32, height: 32)
-                        .clipShape(Circle())
+                if settings.showAvatar {
+                    NavigationLink(value: topic.member) {
+                        KFImage(URL(string: HTMLParser.resolveURL(topic.member.avatarLarge)))
+                            .resizable()
+                            .frame(width: 40, height: 40)
+                            .clipShape(Circle())
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(topic.member.username)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
+                        .font(.body)
+                        .fontWeight(.semibold)
                     HStack(spacing: 4) {
-                        Text(topic.createdTime)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        if !topic.createdTime.isEmpty {
+                            Text(topic.createdTime)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                         if topic.clicks > 0 {
-                            Text("·")
-                                .foregroundStyle(.tertiary)
+                            if !topic.createdTime.isEmpty {
+                                Text("·")
+                                    .foregroundStyle(.tertiary)
+                            }
                             Text("\(topic.clicks) 次点击")
-                                .font(.caption)
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -264,8 +278,8 @@ struct TopicDetailView: View {
             }
 
             Text(topic.title)
-                .font(.title3)
-                .fontWeight(.semibold)
+                .font(.title2)
+                .fontWeight(.bold)
         }
         .padding()
     }
@@ -274,6 +288,7 @@ struct TopicDetailView: View {
 
     private func loadTopic() async {
         isLoading = true
+        error = nil
         do {
             topic = try await client.getTopicDetail(id: topicId)
             if let topic {
@@ -291,6 +306,9 @@ struct TopicDetailView: View {
     }
 
     private func loadMoreReplies() async {
+        guard !isLoading, currentPage < totalPages else { return }
+
+        isLoading = true
         let nextPage = currentPage + 1
         do {
             let result = try await client.getTopicReplies(id: topicId, page: nextPage)
@@ -301,6 +319,7 @@ struct TopicDetailView: View {
         } catch {
             self.error = error.localizedDescription
         }
+        isLoading = false
     }
 
     private func updateConversationIds() {
@@ -352,11 +371,27 @@ struct TopicDetailView: View {
     }
 
     private func thankReply(_ reply: TopicReply) async {
-        guard !reply.thanked else { return }
+        let wasThanked = reply.thanked
         do {
             try await client.thankReply(id: reply.id)
             if let idx = replies.firstIndex(where: { $0.id == reply.id }) {
-                replies[idx].thanked = true
+                let newThanked = !wasThanked
+                let delta = newThanked ? 1 : -1
+                replies[idx] = TopicReply(
+                    id: replies[idx].id,
+                    num: replies[idx].num,
+                    content: replies[idx].content,
+                    contentRendered: replies[idx].contentRendered,
+                    replyTime: replies[idx].replyTime,
+                    replyDevice: replies[idx].replyDevice,
+                    thanksCount: max(0, replies[idx].thanksCount + delta),
+                    member: replies[idx].member,
+                    memberIsOp: replies[idx].memberIsOp,
+                    memberIsMod: replies[idx].memberIsMod,
+                    membersMentioned: replies[idx].membersMentioned,
+                    repliedTo: replies[idx].repliedTo,
+                    thanked: newThanked
+                )
             }
             HapticManager.notification(.success)
         } catch {

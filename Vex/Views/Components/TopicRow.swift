@@ -2,21 +2,24 @@ import Kingfisher
 import SwiftUI
 
 struct TopicRow: View {
+    @EnvironmentObject private var settings: AppSettingsManager
     let feed: HomeTopicFeed
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            KFImage(URL(string: HTMLParser.resolveURL(feed.member.avatarNormal)))
-                .downsampling(size: CGSize(width: 72, height: 72))
-                .cacheOriginalImage()
-                .fade(duration: 0.15)
-                .resizable()
-                .placeholder {
-                    Circle().fill(.quaternary)
-                }
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 36, height: 36)
-                .clipShape(Circle())
+            if settings.showAvatar {
+                KFImage(URL(string: HTMLParser.resolveURL(feed.member.avatarNormal)))
+                    .downsampling(size: CGSize(width: 72, height: 72))
+                    .cacheOriginalImage()
+                    .fade(duration: 0.15)
+                    .resizable()
+                    .placeholder {
+                        Circle().fill(.quaternary)
+                    }
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 36, height: 36)
+                    .clipShape(Circle())
+            }
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
@@ -45,7 +48,7 @@ struct TopicRow: View {
                             .foregroundStyle(.tertiary)
                     }
 
-                    if let lastReplyBy = feed.lastReplyBy {
+                    if settings.showLastReply, let lastReplyBy = feed.lastReplyBy {
                         Text("·  最后回复来自 \(lastReplyBy)")
                             .font(.caption)
                             .foregroundStyle(.tertiary)

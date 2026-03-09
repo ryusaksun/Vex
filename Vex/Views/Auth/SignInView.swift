@@ -21,7 +21,7 @@ struct SignInView: View {
         .navigationBarTitleDisplayMode(.inline)
         .overlay {
             if isLoading {
-                ProgressView()
+                LottieLoadingView()
             }
         }
     }

@@ -14,7 +14,9 @@ struct RepliedTopicsView: View {
     var body: some View {
         List {
             ForEach(replies) { feed in
-                NavigationLink(value: feed.topic) {
+                NavigationLink {
+                    TopicDetailView(topicId: feed.topic.id, brief: feed.topic)
+                } label: {
                     RepliedTopicRow(feed: feed)
                 }
             }
@@ -24,21 +26,18 @@ struct RepliedTopicsView: View {
                     Task { await loadMore() }
                 }
                 .frame(maxWidth: .infinity)
+                .disabled(isLoading)
             }
         }
         .listStyle(.plain)
         .navigationTitle("回复的主题")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: TopicBasic.self) { topic in
-            TopicDetailView(topicId: topic.id, brief: topic)
-        }
         .refreshable {
-            currentPage = 1
-            await loadReplies()
+            await loadReplies(page: 1)
         }
         .overlay {
             if isLoading && replies.isEmpty {
-                ProgressView()
+                LottieLoadingView()
             }
             if let error, replies.isEmpty {
                 ContentUnavailableView(
@@ -56,20 +55,23 @@ struct RepliedTopicsView: View {
             }
         }
         .task {
-            await loadReplies()
+            await loadReplies(page: 1)
         }
     }
 
-    private func loadReplies() async {
+    private func loadReplies(page: Int) async {
         isLoading = true
-        error = nil
+        if page == 1 {
+            error = nil
+        }
         do {
-            let response = try await client.getMemberReplies(username: username, page: currentPage)
-            if currentPage == 1 {
+            let response = try await client.getMemberReplies(username: username, page: page)
+            if page == 1 {
                 replies = response.data
             } else {
                 replies.append(contentsOf: response.data)
             }
+            currentPage = response.pagination.current
             totalPages = response.pagination.total
         } catch {
             self.error = error.localizedDescription
@@ -78,8 +80,8 @@ struct RepliedTopicsView: View {
     }
 
     private func loadMore() async {
-        currentPage += 1
-        await loadReplies()
+        guard !isLoading, currentPage < totalPages else { return }
+        await loadReplies(page: currentPage + 1)
     }
 }
 

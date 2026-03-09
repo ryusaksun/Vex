@@ -59,7 +59,9 @@ struct ViewedTopicsView: View {
     var body: some View {
         List {
             ForEach(viewedTopics.topics) { topic in
-                NavigationLink(value: TopicBasic(id: topic.id, title: topic.title, replies: 0)) {
+                NavigationLink {
+                    TopicDetailView(topicId: topic.id, brief: TopicBasic(id: topic.id, title: topic.title, replies: 0))
+                } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(topic.title)
                             .font(.body)
@@ -86,9 +88,6 @@ struct ViewedTopicsView: View {
         }
         .listStyle(.plain)
         .navigationTitle("浏览历史")
-        .navigationDestination(for: TopicBasic.self) { topic in
-            TopicDetailView(topicId: topic.id, brief: topic)
-        }
         .toolbar {
             if !viewedTopics.topics.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {

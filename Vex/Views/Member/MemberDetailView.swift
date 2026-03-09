@@ -6,6 +6,7 @@ struct MemberDetailView: View {
 
     @Environment(AuthManager.self) private var auth
     @Environment(AlertManager.self) private var alert
+    @EnvironmentObject private var settings: AppSettingsManager
 
     @State private var detail: MemberDetail?
     @State private var meta: MemberMeta?
@@ -41,9 +42,6 @@ struct MemberDetailView: View {
         }
         .navigationTitle("@\(username)")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: TopicBasic.self) { topic in
-            TopicDetailView(topicId: topic.id, brief: topic)
-        }
         .toolbar {
             if let meta, auth.isAuthed {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -62,7 +60,7 @@ struct MemberDetailView: View {
         }
         .overlay {
             if isLoading && detail == nil {
-                ProgressView()
+                LottieLoadingView()
             }
         }
         .task {
@@ -74,10 +72,12 @@ struct MemberDetailView: View {
     private func memberHeader(_ detail: MemberDetail) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 14) {
-                KFImage(URL(string: HTMLParser.resolveURL(detail.avatarLarge)))
-                    .resizable()
-                    .frame(width: 72, height: 72)
-                    .clipShape(Circle())
+                if settings.showAvatar {
+                    KFImage(URL(string: HTMLParser.resolveURL(detail.avatarLarge)))
+                        .resizable()
+                        .frame(width: 72, height: 72)
+                        .clipShape(Circle())
+                }
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(detail.username)

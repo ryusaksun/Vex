@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 struct TopicBottomBar: View {
@@ -8,9 +9,13 @@ struct TopicBottomBar: View {
     let onSubmitted: (TopicReply?) -> Void
 
     @Environment(AlertManager.self) private var alert
+    @EnvironmentObject private var settings: AppSettingsManager
 
     @State private var content = ""
     @State private var isSubmitting = false
+    @State private var isUploading = false
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var showImageConfigAlert = false
     @FocusState private var isFocused: Bool
 
     private let client = V2EXClient.shared
@@ -18,22 +23,25 @@ struct TopicBottomBar: View {
     var body: some View {
         VStack(spacing: 6) {
             // Reply target hint
-            if let replyTo, isFocused {
-                HStack(spacing: 4) {
-                    Text("回复 @\(replyTo.member.username) #\(replyTo.num)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button {
-                        onClearReplyTo()
-                        content = ""
-                    } label: {
+            if let replyTo {
+                Button {
+                    onClearReplyTo()
+                    content = ""
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("回复 @\(replyTo.member.username) #\(replyTo.num)")
+                            .font(.subheadline)
+                            .foregroundStyle(.tint)
                         Image(systemName: "xmark.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
                     }
-                    Spacer()
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 20)
+                .buttonStyle(.plain)
             }
 
             HStack(spacing: 8) {
@@ -45,6 +53,26 @@ struct TopicBottomBar: View {
                     .background(.ultraThinMaterial, in: Capsule())
 
                 if isFocused {
+                    // 图片上传按钮（始终显示）
+                    if isUploading {
+                        ProgressView()
+                            .frame(width: 28, height: 28)
+                    } else if settings.isImageUploadConfigured {
+                        PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Button {
+                            showImageConfigAlert = true
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     Button {
                         Task { await submitReply() }
                     } label: {
@@ -68,10 +96,39 @@ struct TopicBottomBar: View {
                 isFocused = true
             }
         }
+        .onChange(of: selectedPhoto) {
+            guard let item = selectedPhoto else { return }
+            selectedPhoto = nil
+            Task { await uploadImage(item: item) }
+        }
+        .alert("未配置图床", isPresented: $showImageConfigAlert) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("请在 设置 → 偏好设置 → 图床 中配置 GitHub Token 和仓库后使用")
+        }
     }
 
     private var canSend: Bool {
-        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSubmitting
+        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSubmitting && !isUploading
+    }
+
+    private func uploadImage(item: PhotosPickerItem) async {
+        isUploading = true
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else {
+                alert.show(.error, "无法读取图片")
+                isUploading = false
+                return
+            }
+            let url = try await ImageUploader.upload(image: image, config: settings.imageUploadConfig)
+            content += (content.isEmpty ? "" : "\n") + url
+            HapticManager.notification(.success)
+        } catch {
+            HapticManager.notification(.error)
+            alert.show(.error, error.localizedDescription)
+        }
+        isUploading = false
     }
 
     private func submitReply() async {

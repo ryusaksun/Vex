@@ -61,6 +61,29 @@ struct AutoSizingWebView: UIViewRepresentable {
                 border-radius: 4px;
                 cursor: pointer;
             }
+            img.embedded_image {
+                max-width: 100%;
+                width: auto;
+                height: auto;
+                display: inline-block;
+                vertical-align: baseline;
+            }
+            img.embedded_image.embedded-inline {
+                max-width: none;
+                width: auto;
+                height: 1.2em;
+                max-height: 1.2em;
+                vertical-align: -0.2em;
+                border-radius: 0;
+                display: inline-block;
+                margin: 0 0.08em;
+            }
+            img.embedded_image.embedded-block {
+                display: block;
+                max-width: min(100%, 320px);
+                margin-top: 8px;
+                margin-bottom: 4px;
+            }
             pre {
                 background: #f5f5f5;
                 padding: 12px;
@@ -89,7 +112,29 @@ struct AutoSizingWebView: UIViewRepresentable {
                 const height = document.body.scrollHeight;
                 window.webkit.messageHandlers.heightChanged.postMessage(height);
             }
+            function classifyEmbeddedImages() {
+                const images = document.querySelectorAll('img.embedded_image');
+                for (const image of images) {
+                    const updateClass = function() {
+                        image.classList.remove('embedded-inline', 'embedded-block');
+                        if (image.naturalWidth <= 64 && image.naturalHeight <= 64) {
+                            image.classList.add('embedded-inline');
+                        } else {
+                            image.classList.add('embedded-block');
+                        }
+                    };
+                    if (image.complete) {
+                        updateClass();
+                    } else {
+                        image.addEventListener('load', function() {
+                            updateClass();
+                            reportHeight();
+                        }, { once: true });
+                    }
+                }
+            }
             window.onload = function() {
+                classifyEmbeddedImages();
                 reportHeight();
                 // Observe for dynamic changes
                 new ResizeObserver(reportHeight).observe(document.body);

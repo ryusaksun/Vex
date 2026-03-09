@@ -1,5 +1,6 @@
 import Foundation
 import SwiftSoup
+import WebKit
 
 /// V2EX API 客户端 — 基于 URLSession + SwiftSoup HTML 解析
 @MainActor
@@ -43,15 +44,15 @@ final class V2EXClient: ObservableObject {
         baseURL: String? = nil
     ) async throws -> (Data, HTTPURLResponse) {
         let base = baseURL ?? Self.baseURL
-        guard var urlComponents = URLComponents(string: base + path) else {
+        guard let requestURL = URLComponents(string: base + path)?.url else {
             throw V2EXError.unexpectedResponse("Invalid URL: \(path)")
         }
 
         var request: URLRequest
         if method == "GET" {
-            request = URLRequest(url: urlComponents.url!)
+            request = URLRequest(url: requestURL)
         } else {
-            request = URLRequest(url: urlComponents.url!)
+            request = URLRequest(url: requestURL)
             request.httpMethod = method
             if let formData {
                 request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -184,6 +185,10 @@ final class V2EXClient: ObservableObject {
     }
 
     func getHotTopics() async throws -> [TopicDetail] {
+        if let cached: [TopicDetail] = await CacheManager.shared.get("hot_topics", type: [TopicDetail].self, maxAge: 120) {
+            return cached
+        }
+
         // Use REST API for hot topics
         struct APITopic: Decodable {
             let id: Int
@@ -207,7 +212,7 @@ final class V2EXClient: ObservableObject {
         }
 
         let topics: [APITopic] = try await fetchJSON(path: "/api/topics/hot.json", type: [APITopic].self)
-        return topics.map { t in
+        let parsedTopics = topics.map { t in
             TopicDetail(
                 id: t.id,
                 title: t.title,
@@ -226,6 +231,8 @@ final class V2EXClient: ObservableObject {
                 clicks: 0, canAppend: false, canEdit: false, canMove: false
             )
         }
+        await CacheManager.shared.set("hot_topics", value: parsedTopics)
+        return parsedTopics
     }
 
     // MARK: - Topics
@@ -372,8 +379,14 @@ final class V2EXClient: ObservableObject {
     // MARK: - Nodes
 
     func getNodeGroups() async throws -> [NodeGroup] {
+        if let cached: [NodeGroup] = await CacheManager.shared.get("node_groups", type: [NodeGroup].self, maxAge: 1800) {
+            return cached
+        }
+
         let doc = try await fetchHTML(path: "/planes")
-        return try HTMLParser.parseNodeGroups(doc)
+        let groups = try HTMLParser.parseNodeGroups(doc)
+        await CacheManager.shared.set("node_groups", value: groups)
+        return groups
     }
 
     func getNodeDetail(name: String) async throws -> NodeDetail {
@@ -518,6 +531,14 @@ final class V2EXClient: ObservableObject {
         return nodes
     }
 
+    func checkDailySigninStatus() async throws -> Bool {
+        let doc = try await fetchHTML(path: "/mission/daily")
+        // 如果页面有 redeem 链接，说明还没签到；没有则已签到
+        let redeemLink = try doc.select("input.super.normal.button")
+        let buttonValue = redeemLink.isEmpty() ? "" : try redeemLink.val()
+        return !buttonValue.contains("领取")
+    }
+
     func dailySignin() async throws {
         let once = try await getOnce()
         let doc = try await fetchHTML(path: "/mission/daily/redeem?once=\(once)")
@@ -552,11 +573,26 @@ final class V2EXClient: ObservableObject {
 
     func logout() async {
         let storage = HTTPCookieStorage.shared
-        if let cookies = storage.cookies(for: URL(string: Self.baseURL)!) {
-            for cookie in cookies {
+        if let cookies = storage.cookies {
+            for cookie in cookies where cookie.domain.contains("v2ex.com") || cookie.domain.contains("sov2ex.com") {
                 storage.deleteCookie(cookie)
             }
         }
+
+        let cookieStore = WKWebsiteDataStore.default().httpCookieStore
+        let webCookies = await withCheckedContinuation { continuation in
+            cookieStore.getAllCookies { cookies in
+                continuation.resume(returning: cookies)
+            }
+        }
+        for cookie in webCookies where cookie.domain.contains("v2ex.com") || cookie.domain.contains("sov2ex.com") {
+            await withCheckedContinuation { continuation in
+                cookieStore.delete(cookie) {
+                    continuation.resume()
+                }
+            }
+        }
+
         cachedOnce = nil
         currentUsername = nil
         unreadCount = 0
@@ -573,8 +609,7 @@ final class V2EXClient: ObservableObject {
         return (title, content, once)
     }
 
-    func editTopic(id: Int, title: String, content: String) async throws {
-        let once = try await getOnce()
+    func editTopic(id: Int, title: String, content: String, once: String) async throws {
         let doc = try await fetchHTML(
             path: "/edit/topic/\(id)",
             method: "POST",
@@ -613,8 +648,14 @@ final class V2EXClient: ObservableObject {
     // MARK: - XNA
 
     func getXnaFeeds() async throws -> [XnaFeed] {
+        if let cached: [XnaFeed] = await CacheManager.shared.get("xna_feeds", type: [XnaFeed].self, maxAge: 180) {
+            return cached
+        }
+
         let doc = try await fetchHTML(path: "/xna")
-        return try HTMLParser.parseXnaFeeds(doc)
+        let feeds = try HTMLParser.parseXnaFeeds(doc)
+        await CacheManager.shared.set("xna_feeds", value: feeds)
+        return feeds
     }
 
     // MARK: - Search

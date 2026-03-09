@@ -7,6 +7,7 @@ struct MemberTopicsListView: View {
     @State private var currentPage = 1
     @State private var totalPages = 1
     @State private var isLoading = false
+    @State private var error: String?
 
     private let client = V2EXClient.shared
 
@@ -27,40 +28,56 @@ struct MemberTopicsListView: View {
                     Task { await loadMore() }
                 }
                 .padding()
+                .disabled(isLoading)
             }
 
             if isLoading {
-                ProgressView()
+                LottieLoadingView()
                     .padding()
             }
 
             if !isLoading && topics.isEmpty {
-                Text("暂无主题")
-                    .foregroundStyle(.secondary)
+                if let error {
+                    ContentUnavailableView(
+                        "加载失败",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(error)
+                    )
                     .padding(.vertical, 40)
+                } else {
+                    Text("暂无主题")
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 40)
+                }
             }
         }
         .task {
-            await loadTopics()
+            await loadTopics(page: 1)
         }
     }
 
-    private func loadTopics() async {
+    private func loadTopics(page: Int) async {
         isLoading = true
+        if page == 1 {
+            error = nil
+        }
         do {
-            let response = try await client.getMemberTopics(username: username, page: currentPage)
-            if currentPage == 1 {
+            let response = try await client.getMemberTopics(username: username, page: page)
+            if page == 1 {
                 topics = response.data
             } else {
                 topics.append(contentsOf: response.data)
             }
+            currentPage = response.pagination.current
             totalPages = response.pagination.total
-        } catch {}
+        } catch {
+            self.error = error.localizedDescription
+        }
         isLoading = false
     }
 
     private func loadMore() async {
-        currentPage += 1
-        await loadTopics()
+        guard !isLoading, currentPage < totalPages else { return }
+        await loadTopics(page: currentPage + 1)
     }
 }

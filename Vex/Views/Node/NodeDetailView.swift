@@ -10,6 +10,7 @@ struct NodeDetailView: View {
     @State private var currentPage = 1
     @State private var totalPages = 1
     @State private var isLoading = false
+    @State private var error: String?
 
     private let client = V2EXClient.shared
 
@@ -62,18 +63,13 @@ struct NodeDetailView: View {
                         Task { await loadMore() }
                     }
                     .frame(maxWidth: .infinity)
+                    .disabled(isLoading)
                 }
             }
         }
         .listStyle(.plain)
         .navigationTitle(brief?.title ?? nodeName)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: TopicBasic.self) { topic in
-            TopicDetailView(topicId: topic.id, brief: topic)
-        }
-        .navigationDestination(for: MemberBasic.self) { member in
-            MemberDetailView(username: member.username)
-        }
         .toolbar {
             if let node {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -86,64 +82,85 @@ struct NodeDetailView: View {
             }
         }
         .refreshable {
-            currentPage = 1
-            await loadFeeds()
+            await loadFeeds(page: 1)
+        }
+        .overlay {
+            if isLoading && node == nil && feeds.isEmpty {
+                LottieLoadingView()
+            } else if let error, feeds.isEmpty {
+                ContentUnavailableView(
+                    "加载失败",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(error)
+                )
+            }
         }
         .task {
-            await loadFeeds()
+            await loadFeeds(page: 1)
         }
     }
 
-    private func loadFeeds() async {
+    private func loadFeeds(page: Int) async {
         isLoading = true
+        if page == 1 {
+            error = nil
+        }
         do {
-            let response = try await client.getNodeFeeds(name: nodeName, page: currentPage)
-            if currentPage == 1 {
+            let response = try await client.getNodeFeeds(name: nodeName, page: page)
+            if page == 1 {
                 feeds = response.data
             } else {
                 feeds.append(contentsOf: response.data)
             }
+            currentPage = response.pagination.current
             totalPages = response.pagination.total
 
             // Also load node detail
             if node == nil {
                 node = try await client.getNodeDetail(name: nodeName)
             }
-        } catch {}
+        } catch {
+            self.error = error.localizedDescription
+        }
         isLoading = false
     }
 
     private func loadMore() async {
-        currentPage += 1
-        await loadFeeds()
+        guard !isLoading, currentPage < totalPages else { return }
+        await loadFeeds(page: currentPage + 1)
     }
 
     private func toggleCollect() async {
-        guard var n = node else { return }
+        guard let currentNode = node else { return }
         do {
-            if n.collected {
+            if currentNode.collected {
                 try await client.uncollectNode(name: nodeName)
             } else {
                 try await client.collectNode(name: nodeName)
             }
             node?.collected.toggle()
-        } catch {}
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }
 
 struct NodeTopicRow: View {
+    @EnvironmentObject private var settings: AppSettingsManager
     let feed: NodeTopicFeed
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            KFImage(URL(string: HTMLParser.resolveURL(feed.member.avatarNormal)))
-                .resizable()
-                .placeholder {
-                    Circle().fill(.quaternary)
-                }
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 24, height: 24)
-                .clipShape(Circle())
+            if settings.showAvatar {
+                KFImage(URL(string: HTMLParser.resolveURL(feed.member.avatarNormal)))
+                    .resizable()
+                    .placeholder {
+                        Circle().fill(.quaternary)
+                    }
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 24, height: 24)
+                    .clipShape(Circle())
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(feed.topic.title)

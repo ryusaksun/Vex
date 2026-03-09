@@ -4,8 +4,10 @@ import SwiftUI
 struct ProfileView: View {
     @Environment(AuthManager.self) private var auth
     @Environment(AlertManager.self) private var alert
+    @EnvironmentObject private var settings: AppSettingsManager
 
     @State private var isSigningIn = false
+    @State private var hasSigned = false
 
     private let client = V2EXClient.shared
 
@@ -15,15 +17,17 @@ struct ProfileView: View {
                 // User info section
                 Section {
                     HStack(spacing: 14) {
-                        KFImage(URL(string: HTMLParser.resolveURL(user.avatarLarge)))
-                            .resizable()
-                            .placeholder {
-                                Image(systemName: "person.circle.fill")
-                                    .resizable()
-                                    .foregroundStyle(.quaternary)
-                            }
-                            .frame(width: 60, height: 60)
-                            .clipShape(Circle())
+                        if settings.showAvatar {
+                            KFImage(URL(string: HTMLParser.resolveURL(user.avatarLarge)))
+                                .resizable()
+                                .placeholder {
+                                    Image(systemName: "person.circle.fill")
+                                        .resizable()
+                                        .foregroundStyle(.quaternary)
+                                }
+                                .frame(width: 60, height: 60)
+                                .clipShape(Circle())
+                        }
 
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
@@ -78,8 +82,9 @@ struct ProfileView: View {
                     Button {
                         Task { await dailySignin() }
                     } label: {
-                        Label("每日签到", systemImage: "gift")
+                        Label(hasSigned ? "今日已签到" : "每日签到", systemImage: hasSigned ? "gift.fill" : "gift")
                     }
+                    .disabled(hasSigned || isSigningIn)
                 }
 
                 // My content
@@ -159,20 +164,31 @@ struct ProfileView: View {
             }
         }
         .navigationTitle("我的")
+        .task {
+            if auth.isAuthed {
+                if let signed = try? await client.checkDailySigninStatus() {
+                    hasSigned = signed
+                }
+            }
+        }
     }
 
     private func dailySignin() async {
+        isSigningIn = true
         do {
             try await client.dailySignin()
             HapticManager.notification(.success)
             alert.show(.success, "签到成功")
+            hasSigned = true
             auth.refreshUnreadCount()
         } catch {
             if case V2EXError.dailySigned = error {
                 alert.show(.info, "今日已签到")
+                hasSigned = true
             } else {
                 alert.show(.error, error.localizedDescription)
             }
         }
+        isSigningIn = false
     }
 }

@@ -8,4 +8,15 @@ final class AppSettingsManager: ObservableObject {
     @AppStorage("open_links_in_app") var openLinksInApp: Bool = true
     @AppStorage("haptic_feedback") var hapticFeedback: Bool = true
     @AppStorage("auto_check_clipboard") var autoCheckClipboard: Bool = true
+
+    // 图床配置
+    @AppStorage("imgur_client_id") var imgurClientId: String = ""
+
+    var imageUploadConfig: ImageUploader.Config {
+        ImageUploader.Config(clientId: imgurClientId)
+    }
+
+    var isImageUploadConfigured: Bool {
+        imageUploadConfig.isValid
+    }
 }

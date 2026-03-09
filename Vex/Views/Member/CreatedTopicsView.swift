@@ -14,7 +14,9 @@ struct CreatedTopicsView: View {
     var body: some View {
         List {
             ForEach(topics) { feed in
-                NavigationLink(value: feed.topic) {
+                NavigationLink {
+                    TopicDetailView(topicId: feed.topic.id, brief: feed.topic)
+                } label: {
                     MemberTopicRow(feed: feed)
                 }
             }
@@ -24,21 +26,18 @@ struct CreatedTopicsView: View {
                     Task { await loadMore() }
                 }
                 .frame(maxWidth: .infinity)
+                .disabled(isLoading)
             }
         }
         .listStyle(.plain)
         .navigationTitle("创建的主题")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: TopicBasic.self) { topic in
-            TopicDetailView(topicId: topic.id, brief: topic)
-        }
         .refreshable {
-            currentPage = 1
-            await loadTopics()
+            await loadTopics(page: 1)
         }
         .overlay {
             if isLoading && topics.isEmpty {
-                ProgressView()
+                LottieLoadingView()
             }
             if let error, topics.isEmpty {
                 ContentUnavailableView(
@@ -56,20 +55,23 @@ struct CreatedTopicsView: View {
             }
         }
         .task {
-            await loadTopics()
+            await loadTopics(page: 1)
         }
     }
 
-    private func loadTopics() async {
+    private func loadTopics(page: Int) async {
         isLoading = true
-        error = nil
+        if page == 1 {
+            error = nil
+        }
         do {
-            let response = try await client.getMemberTopics(username: username, page: currentPage)
-            if currentPage == 1 {
+            let response = try await client.getMemberTopics(username: username, page: page)
+            if page == 1 {
                 topics = response.data
             } else {
                 topics.append(contentsOf: response.data)
             }
+            currentPage = response.pagination.current
             totalPages = response.pagination.total
         } catch {
             self.error = error.localizedDescription
@@ -78,8 +80,8 @@ struct CreatedTopicsView: View {
     }
 
     private func loadMore() async {
-        currentPage += 1
-        await loadTopics()
+        guard !isLoading, currentPage < totalPages else { return }
+        await loadTopics(page: currentPage + 1)
     }
 }
 
