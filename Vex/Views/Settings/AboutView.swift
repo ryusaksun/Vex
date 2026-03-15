@@ -26,23 +26,29 @@ struct AboutView: View {
             }
 
             Section {
-                Link(destination: URL(string: "https://github.com/Ryusaksun/Vex")!) {
-                    Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                Link(destination: feedbackURL) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Bug 反馈", systemImage: "ladybug")
+                        Text("ryusaksun@outlook.com")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-
-                Link(destination: URL(string: "https://www.v2ex.com")!) {
-                    Label("V2EX", systemImage: "globe")
-                }
-            }
-
-            Section("致谢") {
-                Label("SwiftSoup", systemImage: "doc.text")
-                Label("Kingfisher", systemImage: "photo")
-                Label("MarkdownUI", systemImage: "text.badge.checkmark")
             }
         }
         .navigationTitle("关于")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var feedbackURL: URL {
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = "ryusaksun@outlook.com"
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: "Vex Bug 反馈"),
+            URLQueryItem(name: "body", value: "版本：\(appVersion) (\(buildNumber))\n\n问题描述：\n")
+        ]
+        return components.url ?? URL(string: "mailto:ryusaksun@outlook.com")!
     }
 
     private var appVersion: String {

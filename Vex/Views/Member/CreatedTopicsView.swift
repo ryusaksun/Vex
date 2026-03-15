@@ -19,14 +19,18 @@ struct CreatedTopicsView: View {
                 } label: {
                     MemberTopicRow(feed: feed)
                 }
+                .onAppear {
+                    if feed.id == topics.last?.id, currentPage < totalPages {
+                        Task { await loadMore() }
+                    }
+                }
             }
 
-            if currentPage < totalPages {
-                Button("加载更多") {
-                    Task { await loadMore() }
-                }
-                .frame(maxWidth: .infinity)
-                .disabled(isLoading)
+            if isLoading && !topics.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .listRowSeparator(.hidden)
             }
         }
         .listStyle(.plain)
@@ -38,15 +42,13 @@ struct CreatedTopicsView: View {
         .overlay {
             if isLoading && topics.isEmpty {
                 LottieLoadingView()
-            }
-            if let error, topics.isEmpty {
+            } else if let error, topics.isEmpty {
                 ContentUnavailableView(
                     "加载失败",
                     systemImage: "exclamationmark.triangle",
                     description: Text(error)
                 )
-            }
-            if !isLoading && error == nil && topics.isEmpty {
+            } else if !isLoading && topics.isEmpty {
                 ContentUnavailableView(
                     "暂无主题",
                     systemImage: "square.and.pencil",
@@ -89,7 +91,7 @@ struct MemberTopicRow: View {
     let feed: MemberTopicFeed
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(feed.topic.title)
                 .font(.body)
                 .lineLimit(2)

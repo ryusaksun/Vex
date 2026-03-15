@@ -17,16 +17,20 @@ struct RepliedTopicsView: View {
                 NavigationLink {
                     TopicDetailView(topicId: feed.topic.id, brief: feed.topic)
                 } label: {
-                    RepliedTopicRow(feed: feed)
+                    RepliedTopicCard(feed: feed)
+                }
+                .onAppear {
+                    if feed.id == replies.last?.id, currentPage < totalPages {
+                        Task { await loadMore() }
+                    }
                 }
             }
 
-            if currentPage < totalPages {
-                Button("加载更多") {
-                    Task { await loadMore() }
-                }
-                .frame(maxWidth: .infinity)
-                .disabled(isLoading)
+            if isLoading && !replies.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .listRowSeparator(.hidden)
             }
         }
         .listStyle(.plain)
@@ -38,15 +42,13 @@ struct RepliedTopicsView: View {
         .overlay {
             if isLoading && replies.isEmpty {
                 LottieLoadingView()
-            }
-            if let error, replies.isEmpty {
+            } else if let error, replies.isEmpty {
                 ContentUnavailableView(
                     "加载失败",
                     systemImage: "exclamationmark.triangle",
                     description: Text(error)
                 )
-            }
-            if !isLoading && error == nil && replies.isEmpty {
+            } else if !isLoading && replies.isEmpty {
                 ContentUnavailableView(
                     "暂无回复",
                     systemImage: "arrowshape.turn.up.left",
@@ -82,30 +84,5 @@ struct RepliedTopicsView: View {
     private func loadMore() async {
         guard !isLoading, currentPage < totalPages else { return }
         await loadReplies(page: currentPage + 1)
-    }
-}
-
-struct RepliedTopicRow: View {
-    let feed: RepliedTopicFeed
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(feed.topic.title)
-                .font(.body)
-                .lineLimit(2)
-
-            // Reply content preview
-            HTMLContentView(html: feed.replyContentRendered)
-                .frame(maxHeight: 60)
-                .clipped()
-
-            HStack {
-                Text(feed.replyTime)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                Spacer()
-            }
-        }
-        .padding(.vertical, 2)
     }
 }

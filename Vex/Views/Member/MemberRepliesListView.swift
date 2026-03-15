@@ -15,22 +15,9 @@ struct MemberRepliesListView: View {
         LazyVStack(spacing: 0) {
             ForEach(replies) { feed in
                 NavigationLink(value: feed.topic) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(feed.topic.title)
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                            .lineLimit(2)
-
-                        HTMLContentView(html: feed.replyContentRendered)
-                            .frame(maxHeight: 60)
-                            .clipped()
-
-                        Text(feed.replyTime)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
+                    RepliedTopicCard(feed: feed)
                     .padding(.horizontal)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 4)
                 }
                 .buttonStyle(.plain)
                 Divider().padding(.leading, 16)
@@ -44,12 +31,10 @@ struct MemberRepliesListView: View {
                 .disabled(isLoading)
             }
 
-            if isLoading {
+            if isLoading && replies.isEmpty {
                 LottieLoadingView()
                     .padding()
-            }
-
-            if !isLoading && replies.isEmpty {
+            } else if !isLoading && replies.isEmpty {
                 if let error {
                     ContentUnavailableView(
                         "加载失败",
@@ -62,6 +47,9 @@ struct MemberRepliesListView: View {
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 40)
                 }
+            } else if isLoading {
+                ProgressView()
+                    .padding()
             }
         }
         .task {

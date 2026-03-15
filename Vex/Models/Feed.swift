@@ -1,11 +1,13 @@
 import Foundation
 
 struct HomeTabOption: Codable, Hashable, Identifiable, Sendable {
-    var id: String { value }
+    var id: String { storageKey }
     let value: String
     let label: String
     var type: TabType
     var disabled: Bool
+
+    var storageKey: String { "\(type.rawValue):\(value)" }
 
     enum TabType: String, Codable, Sendable {
         case home, node, user, xna
@@ -45,7 +47,7 @@ struct MemberTopicFeed: Codable, Hashable, Identifiable, Sendable {
 }
 
 struct RepliedTopicFeed: Codable, Hashable, Identifiable, Sendable {
-    var id: String { "\(topic.id)-\(replyTime)-\(replyContentRendered.hashValue)" }
+    var id: String { "\(topic.id)-\(member.username)-\(replyTime)-\(replyContentRendered.prefix(64))" }
     let topic: TopicBasic
     let member: MemberBasic
     let replyContentRendered: String

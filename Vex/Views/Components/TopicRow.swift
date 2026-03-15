@@ -9,7 +9,7 @@ struct TopicRow: View {
         HStack(alignment: .top, spacing: 10) {
             if settings.showAvatar {
                 KFImage(URL(string: HTMLParser.resolveURL(feed.member.avatarNormal)))
-                    .downsampling(size: CGSize(width: 72, height: 72))
+                    .downsampling(size: CGSize(width: 36 * UIScreen.main.scale, height: 36 * UIScreen.main.scale))
                     .cacheOriginalImage()
                     .fade(duration: 0.15)
                     .resizable()

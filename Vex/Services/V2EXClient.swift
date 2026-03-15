@@ -14,7 +14,8 @@ final class V2EXClient: ObservableObject {
 
     // ONCE token cache
     private var cachedOnce: String?
-    private var error403Count = 0
+    private var onceTask: Task<String, any Error>?
+    private var recentPaginationAnchor: Int?
 
     // Event callbacks
     @Published var unreadCount: Int = 0
@@ -76,13 +77,8 @@ final class V2EXClient: ObservableObject {
 
         // Handle 403 (Cloudflare challenge)
         if httpResponse.statusCode == 403 {
-            error403Count += 1
-            if error403Count >= 3 {
-                shouldPrepareFetch = true
-            }
+            shouldPrepareFetch = true
             throw V2EXError.unexpectedResponse("访问被拒绝 (403)，可能需要完成 Cloudflare 验证")
-        } else {
-            error403Count = 0
         }
 
         // Handle other HTTP errors
@@ -151,17 +147,27 @@ final class V2EXClient: ObservableObject {
 
     func getOnce() async throws -> String {
         if let cached = cachedOnce, !cached.isEmpty { return cached }
-        let (data, _) = try await request(path: "/poll_once")
-        let once = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !once.isEmpty else {
-            throw V2EXError.unexpectedResponse("无法获取 ONCE token")
+        // 复用正在进行的请求，避免并发重复请求
+        if let existing = onceTask {
+            return try await existing.value
         }
-        cachedOnce = once
-        return once
+        let task = Task<String, any Error> {
+            defer { onceTask = nil }
+            let (data, _) = try await request(path: "/poll_once")
+            let once = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !once.isEmpty else {
+                throw V2EXError.unexpectedResponse("无法获取 ONCE token")
+            }
+            cachedOnce = once
+            return once
+        }
+        onceTask = task
+        return try await task.value
     }
 
     func invalidateOnce() {
         cachedOnce = nil
+        onceTask = nil
     }
 
     // MARK: - Home & Feeds
@@ -171,21 +177,79 @@ final class V2EXClient: ObservableObject {
         return try HTMLParser.parseHomeTabs(doc)
     }
 
-    func getHomeFeeds(tab: String) async throws -> [HomeTopicFeed] {
-        let doc = try await fetchHTML(path: "/?tab=\(tab)")
-        return try HTMLParser.parseHomeFeeds(doc)
+    func getHomeFeeds(tab: String, page: Int = 1) async throws -> PaginatedResponse<HomeTopicFeed> {
+        if tab == "recent" {
+            return try await getRecentFeeds(page: page)
+        }
+
+        if tab == "hot" {
+            return try await getHotFeeds(page: page)
+        }
+
+        let path = page > 1 ? "/?tab=\(tab)&p=\(page)" : "/?tab=\(tab)"
+        let doc = try await fetchHTML(path: path)
+        let result = try HTMLParser.parseHomeFeedsPage(doc, page: page)
+        return PaginatedResponse(data: result.feeds, pagination: result.pagination)
+    }
+
+    private func getHotFeeds(page: Int) async throws -> PaginatedResponse<HomeTopicFeed> {
+        guard page == 1 else {
+            return PaginatedResponse(data: [], pagination: Pagination(current: 1, total: 1))
+        }
+
+        struct APIHotTopic: Decodable {
+            let id: Int
+            let title: String
+            let replies: Int
+            let member: APIMember
+            let node: APINode
+
+            struct APIMember: Decodable {
+                let username: String
+                let avatarMini: String?
+                let avatarNormal: String?
+                let avatarLarge: String?
+            }
+
+            struct APINode: Decodable {
+                let name: String
+                let title: String
+            }
+        }
+
+        let topics: [APIHotTopic] = try await fetchJSON(path: "/api/topics/hot.json", type: [APIHotTopic].self)
+        let feeds = topics.map { topic in
+            HomeTopicFeed(
+                topic: TopicBasic(id: topic.id, title: topic.title, replies: topic.replies),
+                member: MemberBasic(
+                    username: topic.member.username,
+                    avatarMini: topic.member.avatarMini ?? "",
+                    avatarNormal: topic.member.avatarNormal ?? "",
+                    avatarLarge: topic.member.avatarLarge ?? ""
+                ),
+                lastReplyTime: nil,
+                lastReplyBy: nil,
+                node: NodeBasic(name: topic.node.name, title: topic.node.title)
+            )
+        }
+
+        return PaginatedResponse(data: feeds, pagination: Pagination(current: 1, total: 1))
     }
 
     func getRecentFeeds(page: Int = 1) async throws -> PaginatedResponse<HomeTopicFeed> {
-        let timestamp = Int(Date().timeIntervalSince1970)
-        let doc = try await fetchHTML(path: "/recent?p=\(page)&d=\(timestamp)")
+        if page <= 1 {
+            recentPaginationAnchor = Int(Date().timeIntervalSince1970)
+        }
+
+        let anchor = recentPaginationAnchor ?? Int(Date().timeIntervalSince1970)
+        recentPaginationAnchor = anchor
+
+        let doc = try await fetchHTML(path: "/recent?p=\(page)&d=\(anchor)")
         let feeds = try HTMLParser.parseHomeFeeds(doc)
-        let pageText = try doc.select(".page_current").text()
-        let current = Int(pageText) ?? page
-        let total = Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
+        let pagination = try HTMLParser.parsePagination(doc, page: page)
         return PaginatedResponse(
             data: feeds,
-            pagination: Pagination(current: current, total: max(total, current))
+            pagination: pagination
         )
     }
 
@@ -256,12 +320,21 @@ final class V2EXClient: ObservableObject {
             throw V2EXError.resourceNotFound
         }
         let replies = try HTMLParser.parseTopicReplies(doc)
-
-        let pageText = try doc.select(".page_current").text()
-        let total = Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
-        let pagination = Pagination(current: Int(pageText) ?? page, total: max(total, Int(pageText) ?? 1))
+        let pagination = try HTMLParser.parsePagination(doc, page: page)
 
         return (replies, pagination)
+    }
+
+    /// 一次请求同时获取帖子详情和第一页回复，避免重复请求同一页面
+    func getTopicDetailWithReplies(id: Int) async throws -> (topic: TopicDetail, replies: [TopicReply], pagination: Pagination) {
+        let doc = try await fetchHTML(path: "/t/\(id)")
+        if try HTMLParser.isHomePage(doc) {
+            throw V2EXError.resourceNotFound
+        }
+        let topic = try HTMLParser.parseTopicDetail(doc, id: id)
+        let replies = try HTMLParser.parseTopicReplies(doc)
+        let pagination = try HTMLParser.parsePagination(doc, page: 1)
+        return (topic, replies, pagination)
     }
 
     func collectTopic(id: Int) async throws -> TopicDetail {
@@ -290,8 +363,10 @@ final class V2EXClient: ObservableObject {
         )
         invalidateOnce()
         // Parse JSON response
-        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let success = json["success"] as? Bool, !success {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw V2EXError.unexpectedResponse("响应格式异常")
+        }
+        if let success = json["success"] as? Bool, !success {
             let message = json["message"] as? String ?? "操作失败"
             throw V2EXError.unexpectedResponse(message)
         }
@@ -345,8 +420,10 @@ final class V2EXClient: ObservableObject {
             ]
         )
         invalidateOnce()
-        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let success = json["success"] as? Bool, !success {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw V2EXError.unexpectedResponse("响应格式异常")
+        }
+        if let success = json["success"] as? Bool, !success {
             let message = json["message"] as? String ?? "操作失败"
             throw V2EXError.unexpectedResponse(message)
         }
@@ -408,7 +485,7 @@ final class V2EXClient: ObservableObject {
     func getNodeFeeds(name: String, page: Int = 1) async throws -> PaginatedResponse<NodeTopicFeed> {
         let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
         let doc = try await fetchHTML(path: "/go/\(encodedName)?p=\(page)")
-        let result = try HTMLParser.parseNodeFeeds(doc)
+        let result = try HTMLParser.parseNodeFeeds(doc, page: page)
         return PaginatedResponse(data: result.feeds, pagination: result.pagination)
     }
 
@@ -477,19 +554,16 @@ final class V2EXClient: ObservableObject {
             ))
         }
 
-        let pageText = try doc.select(".page_current").text()
-        let current = Int(pageText) ?? page
-        let total = Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
         return PaginatedResponse(
             data: feeds,
-            pagination: Pagination(current: current, total: max(total, current))
+            pagination: try HTMLParser.parsePagination(doc, page: page)
         )
     }
 
     func getMemberReplies(username: String, page: Int = 1) async throws -> PaginatedResponse<RepliedTopicFeed> {
         let encoded = username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username
         let doc = try await fetchHTML(path: "/member/\(encoded)/replies?p=\(page)")
-        let result = try HTMLParser.parseMemberReplies(doc)
+        let result = try HTMLParser.parseMemberReplies(doc, page: page)
         return PaginatedResponse(data: result.replies, pagination: result.pagination)
     }
 
@@ -521,13 +595,13 @@ final class V2EXClient: ObservableObject {
 
     func getNotifications(page: Int = 1) async throws -> PaginatedResponse<V2EXNotification> {
         let doc = try await fetchHTML(path: "/notifications?p=\(page)")
-        let result = try HTMLParser.parseNotifications(doc)
+        let result = try HTMLParser.parseNotifications(doc, page: page)
         return PaginatedResponse(data: result.notifications, pagination: result.pagination)
     }
 
     func getCollectedTopics(page: Int = 1) async throws -> PaginatedResponse<CollectedTopicFeed> {
         let doc = try await fetchHTML(path: "/my/topics?p=\(page)")
-        let result = try HTMLParser.parseCollectedTopics(doc)
+        let result = try HTMLParser.parseCollectedTopics(doc, page: page)
         return PaginatedResponse(data: result.topics, pagination: result.pagination)
     }
 
@@ -572,7 +646,7 @@ final class V2EXClient: ObservableObject {
 
     func getBalanceRecords(page: Int = 1) async throws -> PaginatedResponse<BalanceRecord> {
         let doc = try await fetchHTML(path: "/balance?p=\(page)")
-        let result = try HTMLParser.parseBalanceRecords(doc)
+        let result = try HTMLParser.parseBalanceRecords(doc, page: page)
         return PaginatedResponse(data: result.records, pagination: result.pagination)
     }
 

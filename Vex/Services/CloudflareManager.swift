@@ -1,7 +1,12 @@
+import Combine
 import Foundation
 import Observation
 import SwiftUI
 import WebKit
+
+extension Notification.Name {
+    static let cloudflareVerificationCompleted = Notification.Name("cloudflareVerificationCompleted")
+}
 
 @Observable
 @MainActor
@@ -10,6 +15,16 @@ final class CloudflareManager {
     var isVerifying = false
 
     private let client = V2EXClient.shared
+    private var cancellable: AnyCancellable?
+
+    init() {
+        cancellable = client.$shouldPrepareFetch.sink { [weak self] shouldPrepareFetch in
+            guard let self else { return }
+            if shouldPrepareFetch {
+                self.needsVerification = true
+            }
+        }
+    }
 
     func checkIfNeeded() {
         if client.shouldPrepareFetch {
@@ -18,9 +33,13 @@ final class CloudflareManager {
     }
 
     func verificationCompleted() {
+        let shouldNotify = needsVerification || isVerifying || client.shouldPrepareFetch
         needsVerification = false
         isVerifying = false
         client.shouldPrepareFetch = false
+        if shouldNotify {
+            NotificationCenter.default.post(name: .cloudflareVerificationCompleted, object: nil)
+        }
     }
 
     func startVerification() {
@@ -68,12 +87,13 @@ struct CloudflareWebView: UIViewRepresentable {
                    !title.lowercased().contains("just a moment") {
                     self.hasCompleted = true
                     // Sync cookies，确保完成后再回调
+                    let completionHandler = self.onCompleted
                     WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
                         for cookie in cookies {
                             HTTPCookieStorage.shared.setCookie(cookie)
                         }
                         DispatchQueue.main.async {
-                            self.onCompleted()
+                            completionHandler()
                         }
                     }
                 }

@@ -20,23 +20,23 @@ struct MemberTopicsListView: View {
                         .padding(.vertical, 8)
                 }
                 .buttonStyle(.plain)
+                .onAppear {
+                    if feed.id == topics.last?.id, currentPage < totalPages {
+                        Task { await loadMore() }
+                    }
+                }
                 Divider().padding(.leading, 16)
             }
 
-            if currentPage < totalPages {
-                Button("加载更多") {
-                    Task { await loadMore() }
-                }
-                .padding()
-                .disabled(isLoading)
+            if isLoading && !topics.isEmpty {
+                ProgressView()
+                    .padding(.vertical, 16)
             }
 
-            if isLoading {
+            if isLoading && topics.isEmpty {
                 LottieLoadingView()
                     .padding()
-            }
-
-            if !isLoading && topics.isEmpty {
+            } else if !isLoading && topics.isEmpty {
                 if let error {
                     ContentUnavailableView(
                         "加载失败",

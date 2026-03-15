@@ -2,6 +2,43 @@ import Foundation
 import Testing
 @testable import Vex
 
+@Test func parseMemberRepliesFromHTML() throws {
+    // 模拟真实 V2EX /member/{username}/replies 页面结构
+    let html = """
+    <div id="Wrapper"><div class="content"><div id="Main"><div class="box">
+    <div class="header"><a href="/">V2EX</a></div>
+    <div class="cell ps_container">
+        <table><tr><td><a href="?p=1" class="page_current">1</a> <a href="?p=2" class="page_normal">2</a> <a href="?p=3" class="page_normal">3</a></td></tr></table>
+    </div>
+    <div class="dock_area">
+        <table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
+            <td><div class="fr"><span class="fade">3 小时前</span></div><span class="gray">回复了 <a href="/member/test">test</a> 创建的主题 <span class="chevron">›</span> <a href="/go/swift">Swift</a> <span class="chevron">›</span> <a href="/t/123#reply5">测试主题标题</a></span></td>
+        </tr></table>
+    </div>
+    <div class="inner"><div class="reply_content">这是回复内容</div></div>
+    <div class="dock_area">
+        <table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
+            <td><div class="fr"><span class="fade">5 小时前</span></div><span class="gray">回复了 <a href="/member/foo">foo</a> 创建的主题 <span class="chevron">›</span> <a href="/go/apple">Apple</a> <span class="chevron">›</span> <a href="/t/456#reply10">另一个主题</a></span></td>
+        </tr></table>
+    </div>
+    <div class="inner"><div class="reply_content">另一条回复</div></div>
+    <div class="cell ps_container">
+        <table><tr><td><a href="?p=1" class="page_current">1</a> <a href="?p=2" class="page_normal">2</a> <a href="?p=3" class="page_normal">3</a></td></tr></table>
+    </div>
+    </div></div></div></div>
+    """
+    let doc = try HTMLParser.parseDocument(html)
+    let result = try HTMLParser.parseMemberReplies(doc)
+    #expect(result.replies.count == 2)
+    #expect(result.replies[0].topic.id == 123)
+    #expect(result.replies[0].topic.title == "测试主题标题")
+    #expect(result.replies[0].replyTime == "3 小时前")
+    #expect(result.replies[0].replyContentRendered.contains("这是回复内容"))
+    #expect(result.replies[1].topic.id == 456)
+    #expect(result.pagination.current == 1)
+    #expect(result.pagination.total == 3)
+}
+
 @Test func htmlParserResolveURL() {
     #expect(HTMLParser.resolveURL("/t/123") == "https://www.v2ex.com/t/123")
     #expect(HTMLParser.resolveURL("https://example.com") == "https://example.com")
@@ -19,6 +56,53 @@ import Testing
     let pagination = HTMLParser.paginationFromText("3/10")
     #expect(pagination.current == 3)
     #expect(pagination.total == 10)
+}
+
+@Test func recentMobilePaginationParsing() throws {
+    let html = """
+    <html>
+    <head>
+        <title>V2EX › 最近的主题 2/39926</title>
+    </head>
+    <body>
+        <div class="box">
+            <div class="cell item">mock feed</div>
+            <div class="inner">
+                <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                    <tr>
+                        <td width="120" align="left"><input type="button" onclick="location.href = '/recent?p=1'" value="‹ 上一页" class="super normal button" /></td>
+                        <td width="auto" align="center"><strong class="fade">2/39926</strong></td>
+                        <td width="120" align="right"><input type="button" onclick="location.href = '/recent?p=3';" value="下一页 ›" class="super normal button" /></td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+    let doc = try HTMLParser.parseDocument(html)
+    let pagination = try HTMLParser.parsePagination(doc, page: 2)
+
+    #expect(pagination.current == 2)
+    #expect(pagination.total == 39926)
+}
+
+@Test func verboseTitlePaginationParsing() throws {
+    let html = """
+    <html>
+    <head>
+        <title>V2EX › Livid 的所有回复 › 第 2 页 / 共 1530 页</title>
+    </head>
+    <body></body>
+    </html>
+    """
+
+    let doc = try HTMLParser.parseDocument(html)
+    let pagination = try HTMLParser.parsePagination(doc, page: 2)
+
+    #expect(pagination.current == 2)
+    #expect(pagination.total == 1530)
 }
 
 @Test func memberAvatarSizeMapping() {
@@ -163,4 +247,37 @@ import Testing
 
     #expect(Int(size.height.rounded()) == Int(HTMLInlineImageLayout.targetHeight.rounded()))
     #expect(Int(size.width.rounded()) == Int(HTMLInlineImageLayout.targetHeight.rounded()))
+}
+
+@Test func parseMemberRepliesFromLiveHTML() throws {
+    let fixtureURL = URL(filePath: #filePath)
+        .deletingLastPathComponent()
+        .appending(path: "replies_test.html")
+    let html = try String(contentsOf: fixtureURL, encoding: .utf8)
+    let doc = try HTMLParser.parseDocument(html)
+    let result = try HTMLParser.parseMemberReplies(doc)
+    #expect(result.replies.count > 0, "应该解析出至少 1 条回复")
+    for reply in result.replies {
+        #expect(!reply.topic.title.isEmpty)
+        #expect(reply.topic.id > 0)
+        #expect(!reply.replyTime.isEmpty)
+        #expect(!reply.member.username.isEmpty)
+    }
+}
+
+@Test func swiftSoupPreservesEmoji() throws {
+    let html = "<p>🔗 传送门： <a href=\"https://example.com\">https://example.com</a></p>"
+    let doc = try HTMLParser.parseDocument(html)
+    let text = try doc.select("p").text()
+    let containsEmoji = text.contains("🔗")
+    let scalars = text.unicodeScalars.map { "U+\(String(format: "%04X", $0.value))" }.joined(separator: " ")
+    #expect(containsEmoji, "SwiftSoup lost emoji. Text=[\(text)] Scalars=[\(scalars)]")
+}
+
+@MainActor
+@Test func htmlContentParserPreservesEmoji() {
+    let html = "<p>🔗 传送门</p>"
+    let kinds = HTMLContentParserTestSupport.blockKinds(for: html)
+    print("Block kinds: \(kinds)")
+    #expect(kinds == ["text"])
 }

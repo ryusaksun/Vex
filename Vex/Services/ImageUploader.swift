@@ -56,7 +56,10 @@ enum ImageUploader {
         }
 
         // Imgur 返回的 link 可能是 http，统一换成 https
-        return link.replacingOccurrences(of: "http://", with: "https://")
+        if link.hasPrefix("http://") {
+            return "https://" + link.dropFirst("http://".count)
+        }
+        return link
     }
 
     enum UploadError: LocalizedError {

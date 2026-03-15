@@ -45,6 +45,9 @@ struct ContentView: View {
                 CloudflareWebView {
                     cloudflare.verificationCompleted()
                 }
+                .onAppear {
+                    cloudflare.startVerification()
+                }
                 .navigationTitle("验证")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {

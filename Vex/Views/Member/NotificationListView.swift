@@ -16,25 +16,33 @@ struct NotificationListView: View {
         Group {
             if auth.isAuthed {
                 LottieRefreshableScrollView {
-                    await loadNotifications(page: 1)
+                    if !auth.isDemoMode { await loadNotifications(page: 1) }
                 } content: {
                     LazyVStack(spacing: 0) {
                         ForEach(notifications) { notification in
-                            NavigationLink(value: notification.topic) {
+                            NavigationLink {
+                                TopicDetailView(
+                                    topicId: notification.topic.id,
+                                    brief: notification.topic,
+                                    scrollToReplyNum: notification.topic.replies > 0 ? notification.topic.replies : nil
+                                )
+                            } label: {
                                 NotificationRow(notification: notification)
                                     .padding(.horizontal)
                                     .padding(.vertical, 8)
                             }
                             .buttonStyle(.plain)
+                            .onAppear {
+                                if notification.id == notifications.last?.id, currentPage < totalPages {
+                                    Task { await loadMore() }
+                                }
+                            }
                             Divider()
                         }
 
-                        if currentPage < totalPages {
-                            Button("加载更多") {
-                                Task { await loadMore() }
-                            }
-                            .padding()
-                            .disabled(isLoading)
+                        if isLoading && !notifications.isEmpty {
+                            ProgressView()
+                                .padding(.vertical, 16)
                         }
                     }
                 }
@@ -50,7 +58,11 @@ struct NotificationListView: View {
                     }
                 }
                 .task {
-                    await loadNotifications(page: 1)
+                    if auth.isDemoMode {
+                        notifications = Self.demoNotifications
+                    } else {
+                        await loadNotifications(page: 1)
+                    }
                 }
             } else {
                 ContentUnavailableView(
@@ -89,6 +101,33 @@ struct NotificationListView: View {
         guard !isLoading, currentPage < totalPages else { return }
         await loadNotifications(page: currentPage + 1)
     }
+
+    static let demoNotifications: [V2EXNotification] = [
+        V2EXNotification(
+            id: "demo-1",
+            member: MemberBasic(username: "livid", avatarMini: "", avatarNormal: "https://cdn.v2ex.com/gravatar/?s=48&d=retro", avatarLarge: ""),
+            topic: TopicBasic(id: 999001, title: "Welcome to V2EX Community", replies: 42),
+            action: .reply,
+            contentRendered: "<p>Great to see new members joining the community!</p>",
+            time: "2 小时前"
+        ),
+        V2EXNotification(
+            id: "demo-2",
+            member: MemberBasic(username: "developer", avatarMini: "", avatarNormal: "https://cdn.v2ex.com/gravatar/?s=48&d=identicon", avatarLarge: ""),
+            topic: TopicBasic(id: 999002, title: "SwiftUI 开发经验分享", replies: 18),
+            action: .thank,
+            contentRendered: "",
+            time: "5 小时前"
+        ),
+        V2EXNotification(
+            id: "demo-3",
+            member: MemberBasic(username: "designer", avatarMini: "", avatarNormal: "https://cdn.v2ex.com/gravatar/?s=48&d=monsterid", avatarLarge: ""),
+            topic: TopicBasic(id: 999003, title: "iOS 18 新特性讨论", replies: 67),
+            action: .reply,
+            contentRendered: "<p>非常赞同你的观点，期待更多分享</p>",
+            time: "昨天"
+        ),
+    ]
 }
 
 struct NotificationRow: View {

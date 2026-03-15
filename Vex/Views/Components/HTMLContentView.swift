@@ -6,24 +6,24 @@ import SwiftUI
 /// 原生 HTML 渲染器 — 使用 SwiftUI Text + AttributedString 替代 WKWebView，彻底消除滚动卡顿
 struct HTMLContentView: View {
     let html: String
-    @State private var webContentHeight: CGFloat = 1
+
+    @State private var selectedImageURL: String?
 
     var body: some View {
-        if html.contains("embedded_image") {
-            AutoSizingWebView(html: html, contentHeight: $webContentHeight)
-                .frame(height: max(webContentHeight, 1))
-        } else {
         let blocks = HTMLBlockParser.parse(html)
+        let imageURLs = Self.collectImageURLs(from: blocks)
+
+        Group {
             if blocks.isEmpty {
                 EmptyView()
-            } else if blocks.count == 1, case .text(let attr) = blocks[0] {
+            } else if blocks.count == 1, case .text(let runs) = blocks[0] {
                 // 快速路径：单文本块（回复的常见情况）
-                Text(attr)
+                HTMLBlockParser.buildText(from: runs)
                     .font(.body)
                     .lineSpacing(3)
                     .tint(.accentColor)
             } else if blocks.count == 1, case .inline(let fragments) = blocks[0] {
-                HTMLInlineFragmentsView(fragments: fragments)
+                HTMLInlineFragmentsView(fragments: fragments, onImageTapped: { selectedImageURL = $0 })
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
@@ -32,22 +32,31 @@ struct HTMLContentView: View {
                 }
             }
         }
+        .fullScreenCover(item: Binding(
+            get: { selectedImageURL.flatMap { ImageID(url: $0) } },
+            set: { selectedImageURL = $0?.url }
+        )) { item in
+            let urls = imageURLs.compactMap { URL(string: $0) }
+            let index = urls.firstIndex(where: { $0.absoluteString == item.url }) ?? 0
+            ImageGalleryView(imageURLs: urls, selectedIndex: index)
+        }
     }
 
     @ViewBuilder
     private func blockView(_ block: HTMLBlock) -> some View {
         switch block {
-        case .text(let attr):
-            Text(attr)
+        case .text(let runs):
+            HTMLBlockParser.buildText(from: runs)
                 .font(.body)
                 .lineSpacing(3)
                 .tint(.accentColor)
 
         case .image(let url):
             HTMLImageBlockView(url: url)
+                .onTapGesture { selectedImageURL = url }
 
         case .inline(let fragments):
-            HTMLInlineFragmentsView(fragments: fragments)
+            HTMLInlineFragmentsView(fragments: fragments, onImageTapped: { selectedImageURL = $0 })
 
         case .codeBlock(let code):
             ScrollView(.horizontal, showsIndicators: false) {
@@ -63,6 +72,32 @@ struct HTMLContentView: View {
             HTMLBlockquoteView(blocks: inner)
         }
     }
+
+    private static func collectImageURLs(from blocks: [HTMLBlock]) -> [String] {
+        var urls: [String] = []
+        for block in blocks {
+            switch block {
+            case .image(let url):
+                urls.append(url)
+            case .inline(let fragments):
+                for fragment in fragments {
+                    if case .image(let url) = fragment {
+                        urls.append(url)
+                    }
+                }
+            case .blockquote(let inner):
+                urls.append(contentsOf: collectImageURLs(from: inner))
+            default:
+                break
+            }
+        }
+        return urls
+    }
+}
+
+private struct ImageID: Identifiable {
+    let url: String
+    var id: String { url }
 }
 
 /// Blockquote 单独作为 struct 避免递归类型推断问题
@@ -73,8 +108,8 @@ private struct HTMLBlockquoteView: View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
-                case .text(let attr):
-                    Text(attr)
+                case .text(let runs):
+                    HTMLBlockParser.buildText(from: runs)
                         .font(.subheadline)
                         .lineSpacing(2)
                         .tint(.accentColor)
@@ -107,22 +142,63 @@ private struct HTMLBlockquoteView: View {
 private struct HTMLInlineFragmentsView: View {
     let fragments: [HTMLInlineFragment]
     var font: Font = .body
+    var onImageTapped: ((String) -> Void)?
+
+    @State private var loadedImages: [String: UIImage] = [:]
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 0) {
-            ForEach(Array(fragments.enumerated()), id: \.offset) { _, fragment in
-                switch fragment {
-                case .text(let attr):
-                    Text(attr)
-                        .font(font)
-                        .lineSpacing(3)
-                        .tint(.accentColor)
-                case .image(let url):
-                    HTMLInlineImageView(url: url)
+        builtText
+            .font(font)
+            .lineSpacing(3)
+            .tint(.accentColor)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .task { await loadAllImages() }
+    }
+
+    private var builtText: Text {
+        var result = Text("")
+        for fragment in fragments {
+            switch fragment {
+            case .text(let runs):
+                result = result + HTMLBlockParser.buildText(from: runs)
+            case .image(let url):
+                if let uiImage = loadedImages[url] {
+                    let scale = UIScreen.main.scale
+                    let targetH = HTMLInlineImageLayout.targetHeight
+                    let aspect = uiImage.size.width / max(uiImage.size.height, 1)
+                    let w = min(HTMLInlineImageLayout.maxWidth, targetH * aspect)
+                    let pixelSize = CGSize(width: w * scale, height: targetH * scale)
+                    if let thumb = uiImage.preparingThumbnail(of: pixelSize),
+                       let cg = thumb.cgImage {
+                        let scaled = UIImage(cgImage: cg, scale: scale, orientation: .up)
+                        result = result + Text(Image(uiImage: scaled))
+                    } else {
+                        result = result + Text(Image(uiImage: uiImage))
+                    }
+                } else {
+                    result = result + Text("⬜")
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        return result
+    }
+
+    private func loadAllImages() async {
+        for fragment in fragments {
+            guard case .image(let url) = fragment,
+                  loadedImages[url] == nil,
+                  let imageURL = URL(string: url) else { continue }
+            // 先查 Kingfisher 缓存
+            if let cached = try? await KingfisherManager.shared.cache.retrieveImage(forKey: url).image {
+                loadedImages[url] = cached
+                continue
+            }
+            // 否则下载
+            do {
+                let result = try await KingfisherManager.shared.retrieveImage(with: imageURL)
+                loadedImages[url] = result.image
+            } catch {}
+        }
     }
 }
 
@@ -192,6 +268,9 @@ enum HTMLImageLayout {
     static let maxHeight: CGFloat = 360
     static let placeholderHeight: CGFloat = 180
 
+    /// 小图（如表情）的最小显示尺寸，避免 web 1x 图片在 3x 设备上缩得太小
+    static let minHeight: CGFloat = 24
+
     static func displaySize(
         for pixelSize: CGSize,
         displayScale: CGFloat,
@@ -203,19 +282,24 @@ enum HTMLImageLayout {
         }
 
         let scale = max(displayScale, 1)
-        let naturalSize = CGSize(width: pixelSize.width / scale, height: pixelSize.height / scale)
-        let resizeRatio = min(1, maxWidth / naturalSize.width, maxHeight / naturalSize.height)
+        var w = pixelSize.width / scale
+        var h = pixelSize.height / scale
 
-        return CGSize(
-            width: naturalSize.width * resizeRatio,
-            height: naturalSize.height * resizeRatio
-        )
+        // 小图按最小尺寸兜底，保持宽高比
+        if h < minHeight {
+            let ratio = minHeight / h
+            w *= ratio
+            h = minHeight
+        }
+
+        let resizeRatio = min(1, maxWidth / w, maxHeight / h)
+        return CGSize(width: w * resizeRatio, height: h * resizeRatio)
     }
 }
 
 enum HTMLInlineImageLayout {
-    static let targetHeight: CGFloat = 20
-    static let maxWidth: CGFloat = 28
+    static let targetHeight: CGFloat = 24
+    static let maxWidth: CGFloat = 32
 
     static func displaySize(for pixelSize: CGSize?, displayScale: CGFloat) -> CGSize {
         guard let pixelSize, pixelSize.width > 0, pixelSize.height > 0 else {
@@ -231,7 +315,7 @@ enum HTMLInlineImageLayout {
 // MARK: - Block Types
 
 private enum HTMLBlock {
-    case text(AttributedString)
+    case text([HTMLBlockParser.InlineRun])
     case image(String)
     case inline([HTMLInlineFragment])
     case codeBlock(String)
@@ -239,7 +323,7 @@ private enum HTMLBlock {
 }
 
 private enum HTMLInlineFragment {
-    case text(AttributedString)
+    case text([HTMLBlockParser.InlineRun])
     case image(String)
 }
 
@@ -278,14 +362,14 @@ private enum HTMLBlockParser {
 
     // MARK: Inline-level
 
-    private struct InlineStyle {
+    struct InlineStyle {
         var isBold = false
         var isItalic = false
         var isCode = false
         var link: URL?
     }
 
-    private enum InlineRun {
+    enum InlineRun {
         case text(String, InlineStyle)
         case inlineImage(String)
         case lineBreak
@@ -405,9 +489,8 @@ private enum HTMLBlockParser {
             let prefix = ordered ? "\(idx). " : "• "
             var liRuns: [InlineRun] = [.text(prefix, .init())]
             liRuns.append(contentsOf: extractInline(from: child))
-            let attr = buildAttributedString(from: liRuns)
-            if !attr.characters.isEmpty {
-                blocks.append(.text(attr))
+            if !liRuns.isEmpty {
+                blocks.append(.text(liRuns))
             }
         }
     }
@@ -461,19 +544,24 @@ private enum HTMLBlockParser {
 
         func flushSegment() {
             guard !segment.isEmpty else { return }
-            if segment.contains(where: {
-                if case .inlineImage = $0 { return true }
-                return false
-            }) {
+            let hasImages = segment.contains { if case .inlineImage = $0 { return true }; return false }
+            let hasText = segment.contains { if case .text = $0 { return true }; return false }
+
+            if hasImages && !hasText {
+                // 纯图片段（截图独占一行）→ block 图片
+                for run in segment {
+                    if case .inlineImage(let url) = run {
+                        blocks.append(.image(url))
+                    }
+                }
+            } else if hasImages {
+                // 图文混排（表情嵌在文字中）→ inline
                 let fragments = buildInlineFragments(from: segment)
                 if !fragments.isEmpty {
                     blocks.append(.inline(fragments))
                 }
-            } else {
-                let attr = buildAttributedString(from: segment)
-                if !attr.characters.isEmpty {
-                    blocks.append(.text(attr))
-                }
+            } else if !segment.isEmpty {
+                blocks.append(.text(segment))
             }
             segment = []
         }
@@ -495,10 +583,7 @@ private enum HTMLBlockParser {
 
         func flushTextBuffer() {
             guard !textBuffer.isEmpty else { return }
-            let attr = buildAttributedString(from: textBuffer)
-            if !attr.characters.isEmpty {
-                fragments.append(.text(attr))
-            }
+            fragments.append(.text(textBuffer))
             textBuffer = []
         }
 
@@ -541,28 +626,33 @@ private enum HTMLBlockParser {
 
     // MARK: Build AttributedString
 
-    private static func buildAttributedString(from runs: [InlineRun]) -> AttributedString {
-        var result = AttributedString()
+    /// 用 Text 拼接替代 AttributedString，确保 emoji 等 supplementary plane 字符正确渲染
+    static func buildText(from runs: [InlineRun]) -> Text {
+        var result = Text("")
+        var hasContent = false
         for run in runs {
             switch run {
             case .text(let content, let style):
-                var attr = AttributedString(content)
-                var intent: InlinePresentationIntent = []
-                if style.isBold { intent.insert(.stronglyEmphasized) }
-                if style.isItalic { intent.insert(.emphasized) }
-                if style.isCode { intent.insert(.code) }
-                if !intent.isEmpty { attr.inlinePresentationIntent = intent }
-                if let link = style.link { attr.link = link }
-                result.append(attr)
+                if style.link != nil {
+                    // 链接必须用 AttributedString 才能点击
+                    var attr = AttributedString(content)
+                    attr.link = style.link
+                    if style.isBold { attr.inlinePresentationIntent = .stronglyEmphasized }
+                    result = result + Text(attr)
+                } else {
+                    var t = Text(verbatim: content)
+                    if style.isCode { t = t.font(.system(size: 15, design: .monospaced)) }
+                    if style.isBold { t = t.bold() }
+                    if style.isItalic { t = t.italic() }
+                    result = result + t
+                }
+                hasContent = true
             case .inlineImage:
                 continue
             case .lineBreak:
-                result.append(AttributedString("\n"))
+                if hasContent { result = result + Text("\n") }
             }
         }
-        // 清理首尾换行
-        while result.characters.last == "\n" { result.characters.removeLast() }
-        while result.characters.first == "\n" { result.characters.removeFirst() }
         return result
     }
 }

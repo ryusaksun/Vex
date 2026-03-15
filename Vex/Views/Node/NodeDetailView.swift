@@ -12,6 +12,7 @@ struct NodeDetailView: View {
     @State private var currentPage = 1
     @State private var totalPages = 1
     @State private var isLoading = false
+    @State private var isLoadingMore = false
     @State private var error: String?
 
     private let client = V2EXClient.shared
@@ -61,11 +62,21 @@ struct NodeDetailView: View {
                 }
 
                 if currentPage < totalPages {
-                    Button("加载更多") {
-                        Task { await loadMore() }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .disabled(isLoading)
+                    Color.clear
+                        .frame(height: 1)
+                        .onGeometryChange(for: Bool.self) { proxy in
+                            proxy.frame(in: .global).minY < UIScreen.main.bounds.height + 120
+                        } action: { isNearBottom in
+                            guard isNearBottom else { return }
+                            Task { await loadMore() }
+                        }
+                }
+
+                if isLoadingMore {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .listRowSeparator(.hidden)
                 }
             }
         }
@@ -103,8 +114,8 @@ struct NodeDetailView: View {
     }
 
     private func loadFeeds(page: Int) async {
-        isLoading = true
         if page == 1 {
+            isLoading = true
             error = nil
         }
         do {
@@ -124,12 +135,16 @@ struct NodeDetailView: View {
         } catch {
             self.error = error.localizedDescription
         }
-        isLoading = false
+        if page == 1 {
+            isLoading = false
+        }
     }
 
     private func loadMore() async {
-        guard !isLoading, currentPage < totalPages else { return }
+        guard !isLoading, !isLoadingMore, currentPage < totalPages else { return }
+        isLoadingMore = true
         await loadFeeds(page: currentPage + 1)
+        isLoadingMore = false
     }
 
     private func toggleCollect() async {

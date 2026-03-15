@@ -4,10 +4,10 @@ import SwiftUI
 struct TopicBottomBar: View {
     let topicId: Int
     var replyTo: TopicReply?
-    let visible: Bool
     let onClearReplyTo: () -> Void
     let onSubmitted: (TopicReply?) -> Void
 
+    @Environment(AuthManager.self) private var auth
     @Environment(AlertManager.self) private var alert
     @EnvironmentObject private var settings: AppSettingsManager
 
@@ -45,12 +45,9 @@ struct TopicBottomBar: View {
             }
 
             HStack(spacing: 8) {
-                TextField("", text: $content, axis: .vertical)
+                TextField("说点儿什么...", text: $content, axis: .vertical)
                     .focused($isFocused)
                     .lineLimit(1...5)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(.ultraThinMaterial, in: Capsule())
 
                 if isFocused {
                     // 图片上传按钮（始终显示）
@@ -84,11 +81,11 @@ struct TopicBottomBar: View {
                     .transition(.scale.combined(with: .opacity))
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
         }
-        .offset(y: visible || isFocused ? 0 : 80)
-        .animation(.easeInOut(duration: 0.2), value: visible)
+        .modifier(GlassEffectModifier())
+        .padding(.horizontal, 24)
         .animation(.easeInOut(duration: 0.15), value: isFocused)
         .onChange(of: replyTo?.id) {
             if let replyTo {
@@ -104,7 +101,7 @@ struct TopicBottomBar: View {
         .alert("未配置图床", isPresented: $showImageConfigAlert) {
             Button("知道了", role: .cancel) {}
         } message: {
-            Text("请在 设置 → 偏好设置 → 图床 中配置 GitHub Token 和仓库后使用")
+            Text("请在 设置 → 偏好设置 → 图床 中配置 Imgur Client-ID 后使用")
         }
     }
 
@@ -135,6 +132,14 @@ struct TopicBottomBar: View {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        if auth.isDemoMode {
+            HapticManager.notification(.success)
+            alert.show(.info, "Demo 模式：回复功能演示")
+            content = ""
+            isFocused = false
+            return
+        }
+
         isSubmitting = true
         do {
             let reply = try await client.postReply(topicId: topicId, content: trimmed)
@@ -148,5 +153,15 @@ struct TopicBottomBar: View {
             alert.show(.error, error.localizedDescription)
         }
         isSubmitting = false
+    }
+}
+
+private struct GlassEffectModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect()
+        } else {
+            content.background(.ultraThinMaterial)
+        }
     }
 }

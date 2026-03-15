@@ -116,6 +116,40 @@ enum HTMLParser {
         return Pagination(current: current, total: total)
     }
 
+    static func parsePagination(_ doc: Document, page: Int) throws -> Pagination {
+        if let currentText = try doc.select(".page_current").first()?.text(),
+           let totalText = try doc.select(".page_normal").last()?.text(),
+           let current = Int(currentText.trimmingCharacters(in: .whitespacesAndNewlines)),
+           let total = Int(totalText.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return Pagination(current: current, total: max(total, current))
+        }
+
+        for element in try doc.select("strong.fade").array().reversed() {
+            let text = try element.text().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard text.contains("/") else { continue }
+            let pagination = paginationFromText(text)
+            if pagination.current > 1 || pagination.total > 1 {
+                return pagination
+            }
+        }
+
+        let title = try doc.title()
+        if let match = title.firstMatch(of: /(\d+\s*\/\s*\d+)/) {
+            let pagination = paginationFromText(String(match.1))
+            if pagination.current > 1 || pagination.total > 1 {
+                return pagination
+            }
+        }
+
+        if let match = title.firstMatch(of: /第\s*(\d+)\s*页\s*\/\s*共\s*(\d+)\s*页/) {
+            let current = Int(match.1) ?? page
+            let total = Int(match.2) ?? current
+            return Pagination(current: current, total: max(total, current))
+        }
+
+        return Pagination(current: page, total: max(page, 1))
+    }
+
     // MARK: - Detect Home Page (error detection)
 
     static func isHomePage(_ doc: Document) throws -> Bool {
@@ -192,6 +226,11 @@ enum HTMLParser {
             ))
         }
         return feeds
+    }
+
+    static func parseHomeFeedsPage(_ doc: Document, page: Int) throws -> (feeds: [HomeTopicFeed], pagination: Pagination) {
+        let feeds = try parseHomeFeeds(doc)
+        return (feeds, try parsePagination(doc, page: page))
     }
 
     // MARK: - Parse Topic Detail
@@ -429,7 +468,7 @@ enum HTMLParser {
 
     // MARK: - Parse Node Feeds
 
-    static func parseNodeFeeds(_ doc: Document) throws -> (feeds: [NodeTopicFeed], pagination: Pagination) {
+    static func parseNodeFeeds(_ doc: Document, page: Int = 1) throws -> (feeds: [NodeTopicFeed], pagination: Pagination) {
         let cells = try doc.select("#Wrapper .content > .box:nth-child(2) .cell")
         var feeds: [NodeTopicFeed] = []
 
@@ -455,21 +494,12 @@ enum HTMLParser {
         }
 
         // Pagination
-        let pageText = try doc.select(".page_current").text()
-        var pagination = Pagination(current: 1, total: 1)
-        if !pageText.isEmpty {
-            let current = Int(pageText) ?? 1
-            let normalPages = try doc.select(".page_normal")
-            let total = normalPages.isEmpty() ? 1 : (Int(try normalPages.last()?.text() ?? "1") ?? 1)
-            pagination = Pagination(current: current, total: max(total, current))
-        }
-
-        return (feeds, pagination)
+        return (feeds, try parsePagination(doc, page: page))
     }
 
     // MARK: - Parse Notifications
 
-    static func parseNotifications(_ doc: Document) throws -> (notifications: [V2EXNotification], pagination: Pagination) {
+    static func parseNotifications(_ doc: Document, page: Int = 1) throws -> (notifications: [V2EXNotification], pagination: Pagination) {
         let cells = try doc.select("#notifications .cell")
         var notifications: [V2EXNotification] = []
 
@@ -506,16 +536,7 @@ enum HTMLParser {
             ))
         }
 
-        let pageText = try doc.select(".page_current").text()
-        let pagination: Pagination
-        if !pageText.isEmpty {
-            let total = Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
-            pagination = Pagination(current: Int(pageText) ?? 1, total: max(total, Int(pageText) ?? 1))
-        } else {
-            pagination = Pagination(current: 1, total: 1)
-        }
-
-        return (notifications, pagination)
+        return (notifications, try parsePagination(doc, page: page))
     }
 
     // MARK: - Parse User Meta
@@ -580,7 +601,7 @@ enum HTMLParser {
 
     // MARK: - Parse Collected Topics
 
-    static func parseCollectedTopics(_ doc: Document) throws -> (topics: [CollectedTopicFeed], pagination: Pagination) {
+    static func parseCollectedTopics(_ doc: Document, page: Int = 1) throws -> (topics: [CollectedTopicFeed], pagination: Pagination) {
         let cells = try doc.select("#Wrapper .box .cell.item")
         var topics: [CollectedTopicFeed] = []
 
@@ -612,17 +633,12 @@ enum HTMLParser {
             ))
         }
 
-        let pageText = try doc.select(".page_current").text()
-        let current = Int(pageText) ?? 1
-        let total = Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
-        let pagination = Pagination(current: current, total: max(total, current))
-
-        return (topics, pagination)
+        return (topics, try parsePagination(doc, page: page))
     }
 
     // MARK: - Parse Member Replies
 
-    static func parseMemberReplies(_ doc: Document) throws -> (replies: [RepliedTopicFeed], pagination: Pagination) {
+    static func parseMemberReplies(_ doc: Document, page: Int = 1) throws -> (replies: [RepliedTopicFeed], pagination: Pagination) {
         let docks = try doc.select("#Wrapper .content .box .dock_area")
         var replies: [RepliedTopicFeed] = []
 
@@ -637,9 +653,15 @@ enum HTMLParser {
             guard let nextEl = try dock.nextElementSibling() else { continue }
             let replyContent = try nextEl.html()
 
-            // Extract member from header
-            guard let memberLink = try dock.select("a[href^=/member/]").first() else { continue }
-            let username = try memberLink.attr("href").replacingOccurrences(of: "/member/", with: "")
+            // Extract member from header（桌面版有链接，移动版是纯文本）
+            let username: String
+            if let memberLink = try dock.select("a[href^=/member/]").first() {
+                username = try memberLink.attr("href").replacingOccurrences(of: "/member/", with: "")
+            } else if let match = headerText.firstMatch(of: /回复了\s+(\S+)\s+创建的主题/) {
+                username = String(match.1)
+            } else {
+                continue
+            }
             let member = MemberBasic(username: username, avatarMini: "", avatarNormal: "", avatarLarge: "")
 
             replies.append(RepliedTopicFeed(
@@ -650,17 +672,12 @@ enum HTMLParser {
             ))
         }
 
-        let pageText = try doc.select(".page_current").text()
-        let current = Int(pageText) ?? 1
-        let total = Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
-        let pagination = Pagination(current: current, total: max(total, current))
-
-        return (replies, pagination)
+        return (replies, try parsePagination(doc, page: page))
     }
 
     // MARK: - Parse Balance Records
 
-    static func parseBalanceRecords(_ doc: Document) throws -> (records: [BalanceRecord], pagination: Pagination) {
+    static func parseBalanceRecords(_ doc: Document, page: Int = 1) throws -> (records: [BalanceRecord], pagination: Pagination) {
         let tables = try doc.select("#Wrapper table")
         guard tables.size() >= 2 else { return ([], Pagination(current: 1, total: 1)) }
 
@@ -686,12 +703,7 @@ enum HTMLParser {
             ))
         }
 
-        let pageText = try doc.select(".page_current").text()
-        let current = Int(pageText) ?? 1
-        let total = Int(try doc.select(".page_normal").last()?.text() ?? "1") ?? 1
-        let pagination = Pagination(current: current, total: max(total, current))
-
-        return (records, pagination)
+        return (records, try parsePagination(doc, page: page))
     }
 
     // MARK: - Parse XNA Feeds

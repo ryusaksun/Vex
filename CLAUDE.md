@@ -37,6 +37,11 @@ xcrun devicectl device install app --device 42712654-735D-528D-8EA7-FC536131B9DE
 xcodebuild test -scheme VexTests -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
+运行单个测试（通过 `-only-testing` 指定）：
+```bash
+xcodebuild test -scheme VexTests -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing VexTests/函数名
+```
+
 ## Dependencies (SPM)
 
 - **SwiftSoup** — HTML 解析
@@ -45,6 +50,18 @@ xcodebuild test -scheme VexTests -destination 'platform=iOS Simulator,name=iPhon
 - **Lottie** — 加载/刷新动画（`Vex/Resources/*.lottie`）
 
 ## Architecture
+
+### 目录结构
+```
+Vex/
+├── Models/          # 数据模型（Topic, Member, Node, Feed, Response）
+├── Services/        # 业务逻辑层（网络、解析、状态管理）
+├── Navigation/      # Router + DeepLinkHandler
+├── Views/           # SwiftUI 视图，按功能分目录（Home, Topic, Member, Node, Search, Settings, Auth, iPad, Browser, Components）
+├── Utils/           # ClipboardWatcher, HapticManager
+├── Resources/       # Lottie 动画文件（*.lottie）
+└── Assets.xcassets/ # 图片资源和 App 图标
+```
 
 ### 数据获取方式
 V2EX 没有可用的 REST API，所有数据通过 **HTML 抓取 + SwiftSoup 解析**获取。`V2EXClient` 使用 URLSession 发请求，`HTMLParser` 负责从 DOM 中提取结构化数据。原版 React Native 实现位于 `/Users/ryuichi/Documents/GitHub/v2ex-react-native`，可作为参考。
@@ -74,6 +91,9 @@ V2EX 没有可用的 REST API，所有数据通过 **HTML 抓取 + SwiftSoup 解
 | `AlertManager.swift` | Toast 提示（成功/错误/信息） |
 | `FavoriteNodesManager.swift` | 收藏节点管理 |
 | `ViewedTopicsManager.swift` | 浏览历史追踪 |
+| `ImageUploader.swift` | Imgur 匿名 API 图片上传 |
+| `ClipboardWatcher` (Utils) | 剪贴板 V2EX 链接检测 |
+| `HapticManager` (Utils) | 触觉反馈 |
 
 ### HTML 内容渲染
 `HTMLContentView` 使用原生 SwiftUI 渲染 HTML 内容（非 WKWebView），但含 `embedded_image` 的内容会回退到 `AutoSizingWebView`（WKWebView）。整个渲染管线集中在 `HTMLContentView.swift` 中：
@@ -100,3 +120,5 @@ V2EX 没有可用的 REST API，所有数据通过 **HTML 抓取 + SwiftSoup 解
 - 错误类型使用 `V2EXError` 枚举，遵循 `LocalizedError`
 - Model 使用 JSONDecoder `.convertFromSnakeCase`，不要同时定义 `CodingKeys`（会冲突）
 - 协议相对 URL（`//cdn.v2ex.com/...`）需通过 `HTMLParser.resolveURL()` 处理
+- API 返回值使用泛型包装：`PaginatedResponse<T>`（带分页）、`EntityResponse<T>`（单实体）、`CollectionResponse<T>`（列表）、`StatusResponse<T>`（操作结果）
+- 测试使用 Apple Testing 框架（`import Testing`），用 `@Test func` 定义、`#expect()` 断言，不要用 XCTest 的 `XCTAssert`

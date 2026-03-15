@@ -145,6 +145,13 @@ struct ProfileView: View {
                     } label: {
                         Label("登录以使用全部功能", systemImage: "person.circle")
                     }
+
+                    Button {
+                        auth.enableDemoMode()
+                    } label: {
+                        Label("Demo 模式（审核员入口）", systemImage: "person.badge.shield.checkmark")
+                    }
+                    .foregroundStyle(.secondary)
                 }
 
                 // Settings (available without login)
@@ -174,6 +181,12 @@ struct ProfileView: View {
     }
 
     private func dailySignin() async {
+        if auth.isDemoMode {
+            HapticManager.notification(.success)
+            alert.show(.info, "Demo 模式：签到演示")
+            hasSigned = true
+            return
+        }
         isSigningIn = true
         do {
             try await client.dailySignin()

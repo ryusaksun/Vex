@@ -101,6 +101,7 @@ struct ReplyRow: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .disabled(reply.thanked)
 
                     if hasConversation {
                         Button(action: { onShowConversation?() }) {

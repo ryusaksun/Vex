@@ -5,6 +5,7 @@ import WebKit
 struct TopicDetailView: View {
     let topicId: Int
     var brief: TopicBasic?
+    var scrollToReplyNum: Int?
 
     @Environment(ViewedTopicsManager.self) private var viewedTopics
     @Environment(AuthManager.self) private var auth
@@ -19,17 +20,20 @@ struct TopicDetailView: View {
     @State private var isLoadingMore = false
     @State private var error: String?
 
+    @State private var loadTask: Task<Void, Never>?
+    @State private var didScrollToTarget = false
+
     // Sheets
     @State private var replyTarget: TopicReply?
     @State private var conversationReply: TopicReply?
     @State private var showShareSheet = false
     @State private var showEditSheet = false
-    @State private var barVisible = true
     @State private var conversationReplyIds = Set<Int>()
 
     private let client = V2EXClient.shared
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let topic {
@@ -51,9 +55,12 @@ struct TopicDetailView: View {
                                 .foregroundStyle(.secondary)
                             HTMLContentView(html: subtle.contentRendered)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
                         .background(.fill.quaternary)
                     }
+
+                    Divider()
 
                     // Reply count divider
                     HStack {
@@ -80,13 +87,14 @@ struct TopicDetailView: View {
                                 conversationReply = reply
                             }
                         )
+                        .id(reply.num)
                         Divider()
                     }
 
                     // Load more
                     if currentPage < totalPages {
                         Button("加载更多回复") {
-                            Task { await loadMoreReplies() }
+                            loadTask = Task { await loadMoreReplies() }
                         }
                         .frame(maxWidth: .infinity)
                         .padding()
@@ -95,22 +103,11 @@ struct TopicDetailView: View {
                 }
             }
         }
-        .onScrollGeometryChange(for: CGFloat.self) { geo in
-            geo.contentOffset.y
-        } action: { oldValue, newValue in
-            let delta = newValue - oldValue
-            guard abs(delta) > 3 else { return }
-            let shouldShow = delta < 0 || newValue < 20
-            if shouldShow != barVisible {
-                barVisible = shouldShow
-            }
-        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if topic != nil {
                 TopicBottomBar(
                     topicId: topicId,
                     replyTo: replyTarget,
-                    visible: barVisible,
                     onClearReplyTo: { replyTarget = nil },
                     onSubmitted: { newReply in
                         replyTarget = nil
@@ -227,7 +224,19 @@ struct TopicDetailView: View {
         // tab bar 隐藏由 ContentView NavigationStack 层统一控制
         .task {
             await loadTopic()
+            // 加载完成后滚动到指定回复
+            if let target = scrollToReplyNum, !didScrollToTarget, !replies.isEmpty {
+                didScrollToTarget = true
+                try? await Task.sleep(for: .milliseconds(300))
+                withAnimation {
+                    proxy.scrollTo(target, anchor: .top)
+                }
+            }
         }
+        .onDisappear {
+            loadTask?.cancel()
+        }
+        } // ScrollViewReader
     }
 
     @ViewBuilder
@@ -291,20 +300,13 @@ struct TopicDetailView: View {
         isLoading = true
         error = nil
         do {
-            topic = try await client.getTopicDetail(id: topicId)
-            if let topic {
-                viewedTopics.markViewed(topic: topic)
-            }
-            do {
-                let result = try await client.getTopicReplies(id: topicId, page: 1)
-                replies = result.replies
-                currentPage = result.pagination.current
-                totalPages = result.pagination.total
-                updateConversationIds()
-            } catch {
-                // 帖子已加载但回复加载失败，用 alert 提示而非覆盖 error overlay
-                alert.show(.error, "回复加载失败：\(error.localizedDescription)")
-            }
+            let result = try await client.getTopicDetailWithReplies(id: topicId)
+            topic = result.topic
+            replies = result.replies
+            currentPage = result.pagination.current
+            totalPages = result.pagination.total
+            updateConversationIds()
+            viewedTopics.markViewed(topic: result.topic)
         } catch {
             self.error = error.localizedDescription
         }
@@ -350,6 +352,12 @@ struct TopicDetailView: View {
     // MARK: - Actions
 
     private func toggleCollect() async {
+        if auth.isDemoMode {
+            topic?.collected.toggle()
+            HapticManager.notification(.success)
+            alert.show(.info, "Demo 模式：\(topic?.collected == true ? "收藏" : "取消收藏")演示")
+            return
+        }
         guard let t = topic else { return }
         do {
             if t.collected {
@@ -365,6 +373,12 @@ struct TopicDetailView: View {
     }
 
     private func thankTopic() async {
+        if auth.isDemoMode {
+            topic?.thanked = true
+            HapticManager.notification(.success)
+            alert.show(.info, "Demo 模式：感谢演示")
+            return
+        }
         guard let t = topic, !t.thanked else { return }
         do {
             try await client.thankTopic(id: topicId)
@@ -377,12 +391,26 @@ struct TopicDetailView: View {
     }
 
     private func thankReply(_ reply: TopicReply) async {
-        let wasThanked = reply.thanked
+        if auth.isDemoMode {
+            if let idx = replies.firstIndex(where: { $0.id == reply.id }) {
+                replies[idx] = TopicReply(
+                    id: replies[idx].id, num: replies[idx].num,
+                    content: replies[idx].content, contentRendered: replies[idx].contentRendered,
+                    replyTime: replies[idx].replyTime, replyDevice: replies[idx].replyDevice,
+                    thanksCount: replies[idx].thanksCount + 1, member: replies[idx].member,
+                    memberIsOp: replies[idx].memberIsOp, memberIsMod: replies[idx].memberIsMod,
+                    membersMentioned: replies[idx].membersMentioned, repliedTo: replies[idx].repliedTo,
+                    thanked: true
+                )
+            }
+            HapticManager.notification(.success)
+            alert.show(.info, "Demo 模式：感谢回复演示")
+            return
+        }
+        guard !reply.thanked else { return }
         do {
             try await client.thankReply(id: reply.id)
             if let idx = replies.firstIndex(where: { $0.id == reply.id }) {
-                let newThanked = !wasThanked
-                let delta = newThanked ? 1 : -1
                 replies[idx] = TopicReply(
                     id: replies[idx].id,
                     num: replies[idx].num,
@@ -390,13 +418,13 @@ struct TopicDetailView: View {
                     contentRendered: replies[idx].contentRendered,
                     replyTime: replies[idx].replyTime,
                     replyDevice: replies[idx].replyDevice,
-                    thanksCount: max(0, replies[idx].thanksCount + delta),
+                    thanksCount: replies[idx].thanksCount + 1,
                     member: replies[idx].member,
                     memberIsOp: replies[idx].memberIsOp,
                     memberIsMod: replies[idx].memberIsMod,
                     membersMentioned: replies[idx].membersMentioned,
                     repliedTo: replies[idx].repliedTo,
-                    thanked: newThanked
+                    thanked: true
                 )
             }
             HapticManager.notification(.success)

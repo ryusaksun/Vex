@@ -36,6 +36,7 @@ struct AutoSizingWebView: UIViewRepresentable {
         <!DOCTYPE html>
         <html>
         <head>
+        <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -153,7 +154,10 @@ struct AutoSizingWebView: UIViewRepresentable {
         let currentHTML = context.coordinator.lastHTML
         if currentHTML != html {
             context.coordinator.lastHTML = html
-            webView.loadHTMLString(styledHTML, baseURL: URL(string: "https://www.v2ex.com"))
+            if let data = styledHTML.data(using: .utf8),
+               let baseURL = URL(string: "https://www.v2ex.com") {
+                webView.load(data, mimeType: "text/html", characterEncodingName: "utf-8", baseURL: baseURL)
+            }
         }
     }
 
