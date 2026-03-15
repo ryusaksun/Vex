@@ -93,6 +93,16 @@ final class V2EXClient: ObservableObject {
         return (data, httpResponse)
     }
 
+    /// 不需要登录即可访问的路径前缀
+    private static let publicPathPrefixes = [
+        "/?tab=", "/recent", "/go/", "/t/", "/api/", "/member/",
+    ]
+
+    private func isPublicPath(_ path: String) -> Bool {
+        if path == "/" { return true }
+        return Self.publicPathPrefixes.contains { path.hasPrefix($0) }
+    }
+
     /// Fetch HTML and parse to SwiftSoup Document, extract side-effect data
     func fetchHTML(path: String, method: String = "GET", formData: [String: String]? = nil) async throws -> Document {
         let (data, response) = try await request(path: path, method: method, formData: formData)
@@ -100,9 +110,29 @@ final class V2EXClient: ObservableObject {
         // Check redirects
         let finalURL = response.url?.absoluteString ?? ""
         if finalURL.contains("/signin") && !path.contains("/signin") {
+            // 公开页面遇到登录重定向：清除残留 Cookie 后重试一次
+            if isPublicPath(path) {
+                clearV2EXCookies()
+                let (retryData, retryResponse) = try await request(path: path, method: method, formData: formData)
+                let retryURL = retryResponse.url?.absoluteString ?? ""
+                if retryURL.contains("/signin") || retryURL.contains("/2fa") {
+                    throw V2EXError.authRequired
+                }
+                return try parseHTMLResponse(retryData, response: retryResponse)
+            }
             throw V2EXError.authRequired
         }
         if finalURL.contains("/2fa") {
+            // 公开页面遇到 2FA 重定向：清除残留的半登录 Cookie 后重试
+            if isPublicPath(path) {
+                clearV2EXCookies()
+                let (retryData, retryResponse) = try await request(path: path, method: method, formData: formData)
+                let retryURL = retryResponse.url?.absoluteString ?? ""
+                if retryURL.contains("/signin") || retryURL.contains("/2fa") {
+                    throw V2EXError.twoFactorRequired(once: "", problems: nil)
+                }
+                return try parseHTMLResponse(retryData, response: retryResponse)
+            }
             let html = String(data: data, encoding: .utf8) ?? ""
             let doc = try HTMLParser.parseDocument(html)
             let once = try HTMLParser.parseOnceToken(doc) ?? ""
@@ -113,6 +143,10 @@ final class V2EXClient: ObservableObject {
             throw V2EXError.restricted
         }
 
+        return try parseHTMLResponse(data, response: response)
+    }
+
+    private func parseHTMLResponse(_ data: Data, response: HTTPURLResponse) throws -> Document {
         guard let html = String(data: data, encoding: .utf8), !html.isEmpty else {
             throw V2EXError.unexpectedResponse("无法解码响应内容")
         }
@@ -133,6 +167,18 @@ final class V2EXClient: ObservableObject {
         }
 
         return doc
+    }
+
+    /// 清除残留的 V2EX Cookie（解决半登录状态导致公开页面被重定向的问题）
+    private func clearV2EXCookies() {
+        let storage = HTTPCookieStorage.shared
+        if let cookies = storage.cookies {
+            for cookie in cookies where cookie.domain.contains("v2ex.com") {
+                storage.deleteCookie(cookie)
+            }
+        }
+        cachedOnce = nil
+        currentUsername = nil
     }
 
     /// Fetch JSON from API endpoint
