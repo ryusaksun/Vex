@@ -3,10 +3,7 @@ import UIKit
 @MainActor
 enum HapticManager {
     private static var isEnabled: Bool {
-        if UserDefaults.standard.object(forKey: "haptic_feedback") == nil {
-            return true
-        }
-        return UserDefaults.standard.bool(forKey: "haptic_feedback")
+        UserDefaults.standard.object(forKey: "haptic_feedback") as? Bool ?? true
     }
 
     static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .medium) {

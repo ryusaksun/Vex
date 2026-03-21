@@ -41,7 +41,7 @@ struct TopicReply: Codable, Hashable, Identifiable, Sendable {
     let contentRendered: String
     let replyTime: String
     let replyDevice: String?
-    let thanksCount: Int
+    var thanksCount: Int
     let member: MemberBasic
     let memberIsOp: Bool
     let memberIsMod: Bool

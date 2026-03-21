@@ -5,7 +5,6 @@ struct LottieRefreshableScrollView<Content: View>: View {
     let onRefresh: () async -> Void
     @ViewBuilder let content: () -> Content
 
-    @State private var scrollOffset: CGFloat = 0
     @State private var isRefreshing = false
     @State private var showAnimation = false
 
@@ -30,22 +29,19 @@ struct LottieRefreshableScrollView<Content: View>: View {
 
                 content()
             }
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.frame(in: .named("lottieRefreshScroll")).minY
-            } action: { newValue in
-                scrollOffset = newValue
-                if !isRefreshing && newValue > threshold {
+            .onGeometryChange(for: Bool.self) { proxy in
+                proxy.frame(in: .named("lottieRefreshScroll")).minY > threshold
+            } action: { isPastThreshold in
+                guard !isRefreshing else { return }
+                if isPastThreshold {
                     showAnimation = true
+                } else if showAnimation {
+                    // 手指松开后 offset 回弹低于阈值，触发刷新
+                    triggerRefresh()
                 }
             }
         }
         .coordinateSpace(.named("lottieRefreshScroll"))
-        .onChange(of: scrollOffset) { oldValue, newValue in
-            // 手指松开后（offset 回弹），且已超过阈值，触发刷新
-            if !isRefreshing && showAnimation && newValue < oldValue && oldValue > threshold {
-                triggerRefresh()
-            }
-        }
     }
 
     private func triggerRefresh() {

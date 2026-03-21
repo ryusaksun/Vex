@@ -50,11 +50,6 @@ struct HomeView: View {
                                     TopicRow(feed: feed)
                                 }
                                 .buttonStyle(.plain)
-                                .onAppear {
-                                    guard hasMorePages, feed.id == feeds.last?.id else { return }
-                                    print("[HomeView] last item appeared, currentPage=\(currentPage) totalPages=\(totalPages) hasMorePages=\(hasMorePages) isLoading=\(isLoading) isLoadingMore=\(isLoadingMore)")
-                                    Task { await loadMoreFeeds() }
-                                }
                             }
 
                             if hasMorePages {
@@ -64,7 +59,6 @@ struct HomeView: View {
                                         proxy.frame(in: .global).minY < bottomTriggerThreshold
                                     } action: { isNearBottom in
                                         guard isNearBottom else { return }
-                                        print("[HomeView] bottom sentinel visible, currentPage=\(currentPage) totalPages=\(totalPages) hasMorePages=\(hasMorePages) isLoading=\(isLoading) isLoadingMore=\(isLoadingMore)")
                                         Task { await loadMoreFeeds() }
                                     }
                             }

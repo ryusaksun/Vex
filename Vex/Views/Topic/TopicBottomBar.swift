@@ -49,37 +49,34 @@ struct TopicBottomBar: View {
                     .focused($isFocused)
                     .lineLimit(1...5)
 
-                if isFocused {
-                    // 图片上传按钮（始终显示）
-                    if isUploading {
-                        ProgressView()
-                            .frame(width: 28, height: 28)
-                    } else if settings.isImageUploadConfigured {
-                        PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Button {
-                            showImageConfigAlert = true
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(.secondary)
-                        }
+                // 图片上传按钮
+                if isUploading {
+                    ProgressView()
+                        .frame(width: 28, height: 28)
+                } else if settings.isImageUploadConfigured {
+                    PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 24))
+                            .foregroundStyle(.secondary)
                     }
-
+                } else {
                     Button {
-                        Task { await submitReply() }
+                        showImageConfigAlert = true
                     } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(canSend ? Color.accentColor : .secondary)
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 24))
+                            .foregroundStyle(.secondary)
                     }
-                    .disabled(!canSend)
-                    .transition(.scale.combined(with: .opacity))
                 }
+
+                Button {
+                    Task { await submitReply() }
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundStyle(canSend ? Color.accentColor : .secondary)
+                }
+                .disabled(!canSend)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)

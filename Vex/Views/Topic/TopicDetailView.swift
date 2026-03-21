@@ -393,15 +393,8 @@ struct TopicDetailView: View {
     private func thankReply(_ reply: TopicReply) async {
         if auth.isDemoMode {
             if let idx = replies.firstIndex(where: { $0.id == reply.id }) {
-                replies[idx] = TopicReply(
-                    id: replies[idx].id, num: replies[idx].num,
-                    content: replies[idx].content, contentRendered: replies[idx].contentRendered,
-                    replyTime: replies[idx].replyTime, replyDevice: replies[idx].replyDevice,
-                    thanksCount: replies[idx].thanksCount + 1, member: replies[idx].member,
-                    memberIsOp: replies[idx].memberIsOp, memberIsMod: replies[idx].memberIsMod,
-                    membersMentioned: replies[idx].membersMentioned, repliedTo: replies[idx].repliedTo,
-                    thanked: true
-                )
+                replies[idx].thanksCount += 1
+                replies[idx].thanked = true
             }
             HapticManager.notification(.success)
             alert.show(.info, "Demo 模式：感谢回复演示")
@@ -411,21 +404,8 @@ struct TopicDetailView: View {
         do {
             try await client.thankReply(id: reply.id)
             if let idx = replies.firstIndex(where: { $0.id == reply.id }) {
-                replies[idx] = TopicReply(
-                    id: replies[idx].id,
-                    num: replies[idx].num,
-                    content: replies[idx].content,
-                    contentRendered: replies[idx].contentRendered,
-                    replyTime: replies[idx].replyTime,
-                    replyDevice: replies[idx].replyDevice,
-                    thanksCount: replies[idx].thanksCount + 1,
-                    member: replies[idx].member,
-                    memberIsOp: replies[idx].memberIsOp,
-                    memberIsMod: replies[idx].memberIsMod,
-                    membersMentioned: replies[idx].membersMentioned,
-                    repliedTo: replies[idx].repliedTo,
-                    thanked: true
-                )
+                replies[idx].thanksCount += 1
+                replies[idx].thanked = true
             }
             HapticManager.notification(.success)
         } catch {

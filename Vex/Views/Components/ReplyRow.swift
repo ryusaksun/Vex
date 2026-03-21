@@ -14,6 +14,8 @@ struct ReplyRow: View {
             if settings.showAvatar {
                 NavigationLink(value: reply.member) {
                     KFImage(URL(string: HTMLParser.resolveURL(reply.member.avatarNormal)))
+                        .downsampling(size: CGSize(width: 36 * UIScreen.main.scale, height: 36 * UIScreen.main.scale))
+                        .cacheOriginalImage()
                         .resizable()
                         .frame(width: 36, height: 36)
                         .clipShape(Circle())

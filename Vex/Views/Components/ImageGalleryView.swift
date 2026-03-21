@@ -6,8 +6,6 @@ struct ImageGalleryView: View {
     @State var selectedIndex: Int = 0
 
     @Environment(\.dismiss) private var dismiss
-    @State private var scale: CGFloat = 1.0
-    @State private var offset: CGSize = .zero
 
     var body: some View {
         NavigationStack {
@@ -61,10 +59,11 @@ struct ImageGalleryView: View {
     private func saveImage() {
         guard imageURLs.indices.contains(selectedIndex) else { return }
         let url = imageURLs[selectedIndex]
-        KingfisherManager.shared.retrieveImage(with: url) { result in
-            if case .success(let value) = result {
-                UIImageWriteToSavedPhotosAlbum(value.image, nil, nil, nil)
-            }
+        Task {
+            do {
+                let result = try await KingfisherManager.shared.retrieveImage(with: url)
+                UIImageWriteToSavedPhotosAlbum(result.image, nil, nil, nil)
+            } catch {}
         }
     }
 }

@@ -109,7 +109,7 @@ struct ContentView: View {
     private var tabView: some View {
         @Bindable var r = router
         TabView(selection: $r.selectedTab) {
-            Tab("主题", systemImage: "text.bubble", value: Router.Tab.home) {
+            Tab("主题", image: "TabTopics", value: Router.Tab.home) {
                 NavigationStack(path: router.path(for: .home)) {
                     HomeView()
                         .commonNavigationDestinations()

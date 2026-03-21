@@ -11,7 +11,7 @@ struct HTMLContentView: View {
 
     var body: some View {
         let blocks = HTMLBlockParser.parse(html)
-        let imageURLs = Self.collectImageURLs(from: blocks)
+        let imageURLs = HTMLBlockParser.imageURLs(for: html)
 
         Group {
             if blocks.isEmpty {
@@ -73,26 +73,6 @@ struct HTMLContentView: View {
         }
     }
 
-    private static func collectImageURLs(from blocks: [HTMLBlock]) -> [String] {
-        var urls: [String] = []
-        for block in blocks {
-            switch block {
-            case .image(let url):
-                urls.append(url)
-            case .inline(let fragments):
-                for fragment in fragments {
-                    if case .image(let url) = fragment {
-                        urls.append(url)
-                    }
-                }
-            case .blockquote(let inner):
-                urls.append(contentsOf: collectImageURLs(from: inner))
-            default:
-                break
-            }
-        }
-        return urls
-    }
 }
 
 private struct ImageID: Identifiable {
@@ -163,18 +143,8 @@ private struct HTMLInlineFragmentsView: View {
                 result = result + HTMLBlockParser.buildText(from: runs)
             case .image(let url):
                 if let uiImage = loadedImages[url] {
-                    let scale = UIScreen.main.scale
-                    let targetH = HTMLInlineImageLayout.targetHeight
-                    let aspect = uiImage.size.width / max(uiImage.size.height, 1)
-                    let w = min(HTMLInlineImageLayout.maxWidth, targetH * aspect)
-                    let pixelSize = CGSize(width: w * scale, height: targetH * scale)
-                    if let thumb = uiImage.preparingThumbnail(of: pixelSize),
-                       let cg = thumb.cgImage {
-                        let scaled = UIImage(cgImage: cg, scale: scale, orientation: .up)
-                        result = result + Text(Image(uiImage: scaled))
-                    } else {
-                        result = result + Text(Image(uiImage: uiImage))
-                    }
+                    // 缩略图已在 loadAllImages 中预计算
+                    result = result + Text(Image(uiImage: uiImage))
                 } else {
                     result = result + Text("⬜")
                 }
@@ -184,20 +154,38 @@ private struct HTMLInlineFragmentsView: View {
     }
 
     private func loadAllImages() async {
+        let scale = UIScreen.main.scale
+        var urlsToLoad: [String] = []
         for fragment in fragments {
             guard case .image(let url) = fragment,
-                  loadedImages[url] == nil,
-                  let imageURL = URL(string: url) else { continue }
-            // 先查 Kingfisher 缓存
-            if let cached = try? await KingfisherManager.shared.cache.retrieveImage(forKey: url).image {
-                loadedImages[url] = cached
-                continue
-            }
-            // 否则下载
+                  loadedImages[url] == nil else { continue }
+            urlsToLoad.append(url)
+        }
+        guard !urlsToLoad.isEmpty else { return }
+
+        // 加载所有图片并预计算缩略图，最后批量更新（减少渲染次数）
+        var newImages: [String: UIImage] = [:]
+        for url in urlsToLoad {
+            guard let imageURL = URL(string: url) else { continue }
             do {
                 let result = try await KingfisherManager.shared.retrieveImage(with: imageURL)
-                loadedImages[url] = result.image
+                let image = result.image
+                // 预计算缩略图，避免在 builtText 中同步生成
+                let targetH = HTMLInlineImageLayout.targetHeight
+                let aspect = image.size.width / max(image.size.height, 1)
+                let w = min(HTMLInlineImageLayout.maxWidth, targetH * aspect)
+                let pixelSize = CGSize(width: w * scale, height: targetH * scale)
+                if let thumb = image.preparingThumbnail(of: pixelSize),
+                   let cg = thumb.cgImage {
+                    newImages[url] = UIImage(cgImage: cg, scale: scale, orientation: .up)
+                } else {
+                    newImages[url] = image
+                }
             } catch {}
+        }
+        // 批量更新：一次性触发渲染，而非每张图片触发一次
+        if !newImages.isEmpty {
+            loadedImages.merge(newImages) { _, new in new }
         }
     }
 }
@@ -333,8 +321,8 @@ private enum HTMLInlineFragment {
 private enum HTMLBlockParser {
 
     static func parse(_ html: String) -> [HTMLBlock] {
-        if let cached = HTMLBlockCache.cache[html] {
-            return cached
+        if let cached = HTMLBlockCache.get(html) {
+            return cached.blocks
         }
 
         let preprocessed = HTMLContentPreprocessor.normalize(html)
@@ -346,8 +334,34 @@ private enum HTMLBlockParser {
             return []
         }
         let blocks = parseChildren(of: body)
-        HTMLBlockCache.store(blocks, for: html)
+        let imageURLs = collectImageURLs(from: blocks)
+        HTMLBlockCache.store(blocks: blocks, imageURLs: imageURLs, for: html)
         return blocks
+    }
+
+    static func imageURLs(for html: String) -> [String] {
+        HTMLBlockCache.get(html)?.imageURLs ?? []
+    }
+
+    private static func collectImageURLs(from blocks: [HTMLBlock]) -> [String] {
+        var urls: [String] = []
+        for block in blocks {
+            switch block {
+            case .image(let url):
+                urls.append(url)
+            case .inline(let fragments):
+                for fragment in fragments {
+                    if case .image(let url) = fragment {
+                        urls.append(url)
+                    }
+                }
+            case .blockquote(let inner):
+                urls.append(contentsOf: collectImageURLs(from: inner))
+            default:
+                break
+            }
+        }
+        return urls
     }
 
     // MARK: Block-level
@@ -742,17 +756,33 @@ enum HTMLContentParserTestSupport {
 
 @MainActor
 private enum HTMLBlockCache {
-    static var cache: [String: [HTMLBlock]] = [:]
-    private static let maxEntries = 256
+    private struct Entry {
+        let blocks: [HTMLBlock]
+        let imageURLs: [String]
+        var lastAccess: UInt64
+    }
 
-    static func store(_ blocks: [HTMLBlock], for html: String) {
-        if cache.count >= maxEntries {
-            // 随机淘汰一半，避免全部清空导致缓存命中率骤降
-            let keysToRemove = Array(cache.keys.prefix(maxEntries / 2))
-            for key in keysToRemove {
-                cache.removeValue(forKey: key)
+    private static var storage: [String: Entry] = [:]
+    private static let maxEntries = 256
+    private static var accessCounter: UInt64 = 0
+
+    static func get(_ html: String) -> (blocks: [HTMLBlock], imageURLs: [String])? {
+        guard storage[html] != nil else { return nil }
+        accessCounter += 1
+        storage[html]!.lastAccess = accessCounter
+        let entry = storage[html]!
+        return (entry.blocks, entry.imageURLs)
+    }
+
+    static func store(blocks: [HTMLBlock], imageURLs: [String], for html: String) {
+        if storage.count >= maxEntries {
+            // LRU：淘汰最久未访问的一半
+            let sorted = storage.sorted { $0.value.lastAccess < $1.value.lastAccess }
+            for (key, _) in sorted.prefix(maxEntries / 2) {
+                storage.removeValue(forKey: key)
             }
         }
-        cache[html] = blocks
+        accessCounter += 1
+        storage[html] = Entry(blocks: blocks, imageURLs: imageURLs, lastAccess: accessCounter)
     }
 }

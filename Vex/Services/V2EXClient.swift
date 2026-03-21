@@ -156,13 +156,13 @@ final class V2EXClient: ObservableObject {
         if let once = try HTMLParser.parseOnceToken(doc) {
             cachedOnce = once
         }
-        if let count = try HTMLParser.parseUnreadCount(doc) {
+        if let count = try HTMLParser.parseUnreadCount(doc), count != unreadCount {
             unreadCount = count
         }
-        if let username = try HTMLParser.parseCurrentUsername(doc) {
+        if let username = try HTMLParser.parseCurrentUsername(doc), username != currentUsername {
             currentUsername = username
         }
-        if let balance = try HTMLParser.parseBalanceBrief(doc) {
+        if let balance = try HTMLParser.parseBalanceBrief(doc), balance != balanceBrief {
             balanceBrief = balance
         }
 
