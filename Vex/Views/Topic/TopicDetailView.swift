@@ -239,7 +239,18 @@ struct TopicDetailView: View {
         } // ScrollViewReader
     }
 
-    @ViewBuilder
+
+    private func topicMetaText(_ topic: TopicDetail) -> String {
+        var parts: [String] = []
+        if !topic.createdTime.isEmpty {
+            parts.append(topic.createdTime)
+        }
+        if topic.clicks > 0 {
+            parts.append("\(topic.clicks) 次点击")
+        }
+        return parts.joined(separator: " · ")
+    }
+
     private func topicHeader(_ topic: TopicDetail) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             // Author info
@@ -257,22 +268,11 @@ struct TopicDetailView: View {
                     Text(topic.member.username)
                         .font(.body)
                         .fontWeight(.semibold)
-                    HStack(spacing: 4) {
-                        if !topic.createdTime.isEmpty {
-                            Text(topic.createdTime)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        if topic.clicks > 0 {
-                            if !topic.createdTime.isEmpty {
-                                Text("·")
-                                    .foregroundStyle(.tertiary)
-                            }
-                            Text("\(topic.clicks) 次点击")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    Text(verbatim: topicMetaText(topic))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
 
                 Spacer()
@@ -287,9 +287,7 @@ struct TopicDetailView: View {
                 }
             }
 
-            Text(topic.title)
-                .font(.title2)
-                .fontWeight(.bold)
+            GreedyTitleText(text: topic.title)
         }
         .padding()
     }
@@ -454,4 +452,30 @@ struct ShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+/// 禁用 iOS 平衡排版的标题，每行尽量填满再换行
+private struct GreedyTitleText: UIViewRepresentable {
+    let text: String
+
+    func makeUIView(context: Context) -> UILabel {
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.lineBreakStrategy = []
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.adjustsFontForContentSizeCategory = true
+        return label
+    }
+
+    func updateUIView(_ label: UILabel, context: Context) {
+        label.text = text
+        let size = UIFont.preferredFont(forTextStyle: .title2).pointSize
+        label.font = UIFont.systemFont(ofSize: size, weight: .bold)
+        label.textColor = .label
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UILabel, context: Context) -> CGSize? {
+        let width = proposal.width ?? UIScreen.main.bounds.width
+        return uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+    }
 }

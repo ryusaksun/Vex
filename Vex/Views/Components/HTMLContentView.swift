@@ -71,6 +71,29 @@ struct HTMLContentView: View {
 
         case .blockquote(let inner):
             HTMLBlockquoteView(blocks: inner)
+
+        case .heading(let level, let runs):
+            HTMLBlockParser.buildText(from: runs)
+                .font(headingFont(level))
+                .fontWeight(.semibold)
+                .lineSpacing(2)
+                .tint(.accentColor)
+
+        case .divider:
+            Divider()
+                .padding(.vertical, 4)
+
+        case .table(let rows):
+            HTMLTableView(rows: rows)
+        }
+    }
+
+    private func headingFont(_ level: Int) -> Font {
+        switch level {
+        case 1: .title
+        case 2: .title2
+        case 3: .title3
+        default: .headline
         }
     }
 
@@ -107,6 +130,16 @@ private struct HTMLBlockquoteView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 case .blockquote:
                     EmptyView()
+                case .heading(_, let runs):
+                    HTMLBlockParser.buildText(from: runs)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .lineSpacing(2)
+                        .tint(.accentColor)
+                case .divider:
+                    Divider()
+                case .table(let rows):
+                    HTMLTableView(rows: rows, font: .caption)
                 }
             }
         }
@@ -117,6 +150,48 @@ private struct HTMLBlockquoteView: View {
                 .fill(.tertiary)
                 .frame(width: 3)
         }
+    }
+}
+
+/// 表格渲染视图 — 使用 Grid 自适应列宽，文字自动换行
+private struct HTMLTableView: View {
+    let rows: [[HTMLTableCell]]
+    var font: Font = .subheadline
+
+    private var columnCount: Int { rows.map(\.count).max() ?? 0 }
+
+    var body: some View {
+        Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { rowIdx, row in
+                GridRow {
+                    ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                        HTMLBlockParser.buildText(from: cell.runs)
+                            .font(cell.isHeader ? font.weight(.semibold) : font)
+                            .lineSpacing(2)
+                            .tint(.accentColor)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                    }
+                }
+                .background(rowIdx == 0 && row.first?.isHeader == true
+                            ? Color.primary.opacity(0.06)
+                            : Color.clear)
+
+                if rowIdx < rows.count - 1 {
+                    let cols = columnCount
+                    GridRow {
+                        Divider()
+                            .gridCellColumns(cols)
+                    }
+                }
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(.tertiary, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -309,6 +384,14 @@ private enum HTMLBlock {
     case inline([HTMLInlineFragment])
     case codeBlock(String)
     case blockquote([HTMLBlock])
+    case heading(Int, [HTMLBlockParser.InlineRun]) // level, content
+    case divider
+    case table([[HTMLTableCell]]) // rows of cells
+}
+
+private struct HTMLTableCell {
+    let runs: [HTMLBlockParser.InlineRun]
+    let isHeader: Bool
 }
 
 private enum HTMLInlineFragment {
@@ -436,6 +519,39 @@ private enum HTMLBlockParser {
                     }
                 }
 
+            case "h1", "h2", "h3", "h4", "h5", "h6":
+                flush(&runs, into: &blocks)
+                let level = Int(String(el.tagName().last!)) ?? 2
+                let headingRuns = extractInline(from: el, style: .init())
+                if !headingRuns.isEmpty {
+                    blocks.append(.heading(level, headingRuns))
+                }
+
+            case "hr":
+                flush(&runs, into: &blocks)
+                blocks.append(.divider)
+
+            case "table":
+                flush(&runs, into: &blocks)
+                appendTable(from: el, into: &blocks)
+
+            case "thead", "tbody", "tfoot":
+                // 如果 table 没被捕获，fallback 处理
+                flush(&runs, into: &blocks)
+                parseNodes(el.getChildNodes(), into: &blocks, runs: &runs, style: style)
+                flush(&runs, into: &blocks)
+
+            case "tr":
+                flush(&runs, into: &blocks)
+                parseNodes(el.getChildNodes(), into: &blocks, runs: &runs, style: style)
+                flush(&runs, into: &blocks)
+
+            case "th", "td":
+                // 不在 table 上下文中时，当作 div 处理
+                flush(&runs, into: &blocks)
+                parseNodes(el.getChildNodes(), into: &blocks, runs: &runs, style: style)
+                flush(&runs, into: &blocks)
+
             case "ul", "ol":
                 flush(&runs, into: &blocks)
                 appendList(from: el, into: &blocks)
@@ -507,6 +623,32 @@ private enum HTMLBlockParser {
             if !liRuns.isEmpty {
                 blocks.append(.text(liRuns))
             }
+        }
+    }
+
+    private static func appendTable(from element: Element, into blocks: inout [HTMLBlock]) {
+        var rows: [[HTMLTableCell]] = []
+        // 遍历 thead/tbody/tfoot 和直接的 tr
+        func collectRows(from parent: Element) {
+            for child in parent.children() {
+                let tag = child.tagName().lowercased()
+                if tag == "tr" {
+                    var cells: [HTMLTableCell] = []
+                    for cell in child.children() {
+                        let cellTag = cell.tagName().lowercased()
+                        guard cellTag == "th" || cellTag == "td" else { continue }
+                        let cellRuns = extractInline(from: cell)
+                        cells.append(HTMLTableCell(runs: cellRuns, isHeader: cellTag == "th"))
+                    }
+                    if !cells.isEmpty { rows.append(cells) }
+                } else if tag == "thead" || tag == "tbody" || tag == "tfoot" {
+                    collectRows(from: child)
+                }
+            }
+        }
+        collectRows(from: element)
+        if !rows.isEmpty {
+            blocks.append(.table(rows))
         }
     }
 
@@ -751,6 +893,12 @@ enum HTMLContentParserTestSupport {
                 "code"
             case .blockquote:
                 "blockquote"
+            case .heading:
+                "heading"
+            case .divider:
+                "divider"
+            case .table:
+                "table"
             }
         }
     }
