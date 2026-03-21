@@ -13,6 +13,7 @@ struct HTMLContentView: View {
         let blocks = HTMLBlockParser.parse(html)
         let imageURLs = HTMLBlockParser.imageURLs(for: html)
 
+
         Group {
             if blocks.isEmpty {
                 EmptyView()
@@ -640,7 +641,8 @@ private enum HTMLBlockParser {
 
     // MARK: Build AttributedString
 
-    /// 用 Text 拼接替代 AttributedString，确保 emoji 等 supplementary plane 字符正确渲染
+    /// 用 Text 拼接渲染 HTML 文本内容
+    /// 链接使用 AttributedString 保持可点击性，其余文本用 AttributedString 配合修饰符拼接
     static func buildText(from runs: [InlineRun]) -> Text {
         var result = Text("")
         var hasContent = false

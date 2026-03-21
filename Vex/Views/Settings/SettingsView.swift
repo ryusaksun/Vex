@@ -11,6 +11,11 @@ struct SettingsView: View {
                 } label: {
                     Label("主题设置", systemImage: "paintbrush")
                 }
+                NavigationLink {
+                    AppIconSettingsView()
+                } label: {
+                    Label("应用图标", systemImage: "app.dashed")
+                }
             }
 
             Section("浏览") {
